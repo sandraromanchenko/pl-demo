@@ -1,0 +1,60 @@
+# Embedding model catalog (referenced from mongot.yml). TEMPLATE: ${TEI_URL} and
+# ${OLLAMA_URL} are substituted at container start.
+#
+# modelName -> the index definition's `model` field. outputDimensions MUST match
+# the model's native dimension. Schema is strict: queryPrefix/documentPrefix go
+# under config.modelConfig and credentials under config, or the catalog fails to
+# load ("supported models are: []").
+configs:
+  - modelName: bge-small
+    embeddingProvider: OPENAI_COMPATIBLE
+    config:
+      providerEndpoint: ${TEI_URL}/v1/embeddings
+      modelConfig:
+        batchSize: 96
+        batchTokenLimit: 120000
+        outputDimensions: 384
+        quantization: float
+        # bge-*-en-v1.5: prefix the query only (trailing space is part of the value).
+        queryPrefix: "Represent this sentence for searching relevant passages: "
+      errorHandlingConfig:
+        maxRetries: 10
+        initialRetryWaitMs: 200
+        maxRetryWaitMs: 10000
+        jitter: 0.1
+      credentials: {}
+
+  - modelName: nomic-embed-text
+    embeddingProvider: OPENAI_COMPATIBLE
+    config:
+      providerEndpoint: ${OLLAMA_URL}/v1/embeddings
+      modelConfig:
+        batchSize: 96
+        batchTokenLimit: 120000
+        outputDimensions: 768
+        quantization: float
+        # nomic-embed-text is asymmetric: different query/document prefixes.
+        queryPrefix: "search_query: "
+        documentPrefix: "search_document: "
+      errorHandlingConfig:
+        maxRetries: 10
+        initialRetryWaitMs: 200
+        maxRetryWaitMs: 10000
+        jitter: 0.1
+      credentials: {}
+
+  - modelName: bge-m3
+    embeddingProvider: OPENAI_COMPATIBLE
+    config:
+      providerEndpoint: ${OLLAMA_URL}/v1/embeddings
+      modelConfig:
+        batchSize: 96
+        batchTokenLimit: 120000
+        outputDimensions: 1024
+        quantization: float
+      errorHandlingConfig:
+        maxRetries: 10
+        initialRetryWaitMs: 200
+        maxRetryWaitMs: 10000
+        jitter: 0.1
+      credentials: {}

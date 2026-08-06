@@ -1,0 +1,40 @@
+# Ignore raw CSV inputs if present
+data/*.csv
+data/*.ndjson
+!data/boardgames.ndjson
+!data/sample_boardgames.ndjson
+data/*.json
+
+# Local env files (only *.example / env/*.env templates are committed)
+.env
+*.env
+!env/*.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-error.log*
+
+# Terraform
+deploy/aws/.terraform/
+deploy/aws/*.tfstate
+deploy/aws/*.tfstate.*
+deploy/aws/*.tfvars
+!deploy/aws/*.tfvars.example
+deploy/aws/.terraform.lock.hcl
+crash.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,284 @@
+name: pl-demo
+
+# Local: run all profiles on one host (cross-host env vars default to service
+# names). AWS: each host runs ONE profile with .env pointing at the others' IPs.
+# Profiles: data (mongod, mongot, pmm-client) / models (tei, ollama) /
+# app (backend, frontend, seed one-shot, pmm-server).
+
+services:
+  # ---------------------------------------------------------------- data profile
+  mongod:
+    image: ${MONGOD_IMAGE:-perconalab/percona-server-mongodb:8.3.4-1}
+    profiles: ["data"]
+    user: "0"
+    hostname: mongod
+    command:
+      - bash
+      - -ec
+      - |
+        install -d -m 0750 -o mongodb -g root /etc/mongodb
+        install -m 0400 -o mongodb -g root /mnt/keyfile /etc/mongodb/keyfile
+        chown -R mongodb:0 /var/lib/mongo
+        if [ ! -f /var/lib/mongo/.replset-init ]; then
+          gosu mongodb:1001 /entrypoint.sh mongod --config /etc/mongod.conf &
+          pid=$$!
+          until mongosh --quiet --eval 'db.adminCommand({ ping: 1 })' >/dev/null 2>&1; do sleep 1; done
+          mongosh --quiet --eval 'rs.initiate({_id:"rs", members:[{_id:0, host:"mongod:27017"}]})'
+          until mongosh --quiet --eval 'db.hello().isWritablePrimary' >/dev/null 2>&1; do sleep 1; done
+          mongosh --quiet --eval '
+            db.getSiblingDB("admin").createUser({
+              user: "root",
+              pwd: "root",
+              roles: [{ role: "root", db: "admin" }]
+            })
+          '
+          kill -TERM "$$pid"
+          wait "$$pid"
+          touch /var/lib/mongo/.replset-init
+        fi
+        exec gosu mongodb:1001 /entrypoint.sh mongod --config /etc/mongod.conf
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./config/mongod.conf:/etc/mongod.conf:ro
+      - ./config/keyfile:/mnt/keyfile:ro
+      - mongod_data:/var/lib/mongo
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mongosh",
+          "-u",
+          "root",
+          "-p",
+          "root",
+          "--authenticationDatabase",
+          "admin",
+          "--quiet",
+          "--eval",
+          "db.hello().isWritablePrimary",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks:
+      - pl-demo
+
+  mongot:
+    image: ${MONGOT_IMAGE:-perconalab/percona-search-mongodb:dev}
+    profiles: ["data"]
+    user: "0"
+    hostname: mongot
+    # Renders the embedding catalog template (${TEI_URL}/${OLLAMA_URL}).
+    environment:
+      TEI_URL: ${TEI_URL:-http://tei:80}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+    entrypoint:
+      - bash
+      - -ec
+      - |
+        install -d -m 0750 -o mongodb -g root /etc/mongot/secrets
+        install -m 0400 -o mongodb -g root /mnt/keyfile /etc/mongot/secrets/passwordFile
+        chown -R mongodb:0 /var/lib/mongot
+        sed -e 's|$${TEI_URL}|'"$$TEI_URL"'|g' \
+            -e 's|$${OLLAMA_URL}|'"$$OLLAMA_URL"'|g' \
+            /etc/mongot/embedding-service-configs.yml.tmpl \
+            > /etc/mongot/embedding-service-configs.yml
+        exec setpriv --reuid=1001 --regid=0 --init-groups /entrypoint.sh mongot --config /etc/mongot/mongot.yml
+    ports:
+      - "27028:27028"
+      - "8080:8080"
+    volumes:
+      - ./config/mongot.yml:/etc/mongot/mongot.yml:ro
+      - ./config/embedding-service-configs.yml.tmpl:/etc/mongot/embedding-service-configs.yml.tmpl:ro
+      - ./config/keyfile:/mnt/keyfile:ro
+      - mongot_data:/var/lib/mongot
+    depends_on:
+      mongod:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:8080/ready >/dev/null || exit 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks:
+      - pl-demo
+
+  # PMM client sidecar: registers mongod with the PMM server on the app host.
+  pmm-client:
+    image: ${PMM_CLIENT_IMAGE:-percona/pmm-client:2}
+    profiles: ["data"]
+    hostname: pmm-client
+    depends_on:
+      mongod:
+        condition: service_healthy
+    environment:
+      PMM_SERVER: ${PMM_SERVER:-pmm-server}
+      PMM_SERVER_PORT: ${PMM_SERVER_PORT:-443}
+      PMM_USERNAME: ${PMM_USERNAME:-admin}
+      PMM_PASSWORD: ${PMM_PASSWORD:-admin}
+      MONGO_HOST: ${MONGO_HOST:-mongod}
+      MONGO_ADMIN_USER: ${MONGO_ADMIN_USER:-root}
+      MONGO_ADMIN_PASSWORD: ${MONGO_ADMIN_PASSWORD:-root}
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        CFG=/usr/local/percona/pmm2/config/pmm-agent.yaml
+        pmm-agent setup \
+          --config-file="$$CFG" \
+          --server-address="$$PMM_SERVER:$$PMM_SERVER_PORT" \
+          --server-insecure-tls \
+          --server-username="$$PMM_USERNAME" \
+          --server-password="$$PMM_PASSWORD" \
+          --paths-tempdir=/tmp >/tmp/pmm-setup.log 2>&1 || true
+        pmm-agent --config-file="$$CFG" &
+        pid=$$!
+        until pmm-admin status >/dev/null 2>&1; do sleep 2; done
+        pmm-admin add mongodb \
+          --username="$$MONGO_ADMIN_USER" --password="$$MONGO_ADMIN_PASSWORD" \
+          --host="$$MONGO_HOST" --port=27017 \
+          --service-name=boardgames-mongod || true
+        wait $$pid
+    networks:
+      - pl-demo
+
+  # -------------------------------------------------------------- models profile
+  tei:
+    image: ${TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9}
+    profiles: ["models"]
+    hostname: tei
+    command: ["--model-id", "${TEI_MODEL_ID:-BAAI/bge-small-en-v1.5}"]
+    ports:
+      - "8085:80"
+    volumes:
+      - tei_data:/data
+    networks:
+      - pl-demo
+
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+    profiles: ["models"]
+    hostname: ollama
+    environment:
+      EMBED_MODELS: ${EMBED_MODELS:-bge-small}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        /bin/ollama serve &
+        pid=$$!
+        until /bin/ollama list >/dev/null 2>&1; do sleep 1; done
+        # Pull Ollama models from EMBED_MODELS (skip TEI's bge-small).
+        for m in $$(echo "$$EMBED_MODELS" | tr ',' ' '); do
+          if [ "$$m" != "bge-small" ]; then /bin/ollama pull "$$m"; fi
+        done
+        wait $$pid
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 120s
+    networks:
+      - pl-demo
+
+  # ----------------------------------------------------------------- app profile
+  backend:
+    build:
+      context: ./backend
+    image: ${BACKEND_IMAGE:-pl-demo-backend:latest}
+    # Locally built image: always build, never pull.
+    pull_policy: build
+    profiles: ["app"]
+    hostname: backend
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://root:root@mongod:27017/?authSource=admin&directConnection=true}
+      MONGO_DB: ${MONGO_DB:-boardgames}
+      MONGO_COLLECTION: ${MONGO_COLLECTION:-games}
+      TEXT_INDEX: ${TEXT_INDEX:-text_index}
+      # Enabled models (comma-separated); drives /models and the vector indexes.
+      EMBED_MODELS: ${EMBED_MODELS:-bge-small}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-bge-small}
+    ports:
+      - "8000:8000"
+    networks:
+      - pl-demo
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the bundle at build time (app host's public backend URL on AWS).
+        VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8000}
+    image: ${FRONTEND_IMAGE:-pl-demo-frontend:latest}
+    # Locally built image: always build, never pull.
+    pull_policy: build
+    profiles: ["app"]
+    hostname: frontend
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-8081}:80"
+    networks:
+      - pl-demo
+
+  # One-shot loader: inserts games and creates the text + vector indexes.
+  seed:
+    image: ${SEED_IMAGE:-python:3.12-slim}
+    profiles: ["app"]
+    restart: "no"
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://root:root@mongod:27017/?authSource=admin&directConnection=true}
+      MONGO_DB: ${MONGO_DB:-boardgames}
+      MONGO_COLLECTION: ${MONGO_COLLECTION:-games}
+      TEXT_INDEX: ${TEXT_INDEX:-text_index}
+      EMBED_MODELS: ${EMBED_MODELS:-bge-small}
+      DATASET: ${DATASET:-sample}
+      DATA_FILE: /work/data/boardgames.ndjson
+      SAMPLE_FILE: /work/data/sample_boardgames.ndjson
+      SEED_DATA: ${SEED_DATA:-true}
+      WAIT_INDEX_READY: ${WAIT_INDEX_READY:-true}
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        pip install --quiet --no-cache-dir pymongo==4.10.1
+        exec python /work/data/seed.py
+    volumes:
+      - ./data:/work/data:ro
+    networks:
+      - pl-demo
+
+  # PMM server web UI (runs on the app host).
+  pmm-server:
+    image: ${PMM_SERVER_IMAGE:-percona/pmm-server:2}
+    profiles: ["app"]
+    hostname: pmm-server
+    ports:
+      - "${PMM_HTTP_PORT:-8443}:443"
+    volumes:
+      - pmm_data:/srv
+    networks:
+      - pl-demo
+
+volumes:
+  mongod_data:
+  mongot_data:
+  tei_data:
+  ollama_data:
+  pmm_data:
+
+networks:
+  pl-demo:
+    driver: bridge

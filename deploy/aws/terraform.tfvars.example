@@ -1,0 +1,26 @@
+# Copy to terraform.tfvars and edit. Sensible defaults are set, so you mainly
+# need to set key_name.
+
+# REQUIRED: an existing EC2 key pair in this region for SSH access. No default,
+# so set it here (or pass TF_VAR_key_name / -var 'key_name=...') before apply.
+key_name = "my-ec2-keypair"
+
+# Where user_data clones the demo from (must be reachable from EC2).
+repo_url    = "https://github.com/sandraromancnheko/pl-demo.git"
+repo_branch = "main"
+
+# AMI + network (override only if you know you need to).
+# aws_region = "us-west-2"
+# subnet_id  = "subnet-07f71e1a3117a32f9"
+# ami        = "ami-01c276c8e835125d1"   # Ubuntu 24.04 (noble)
+# billing_tag = "dev"
+
+# mongot build WITH the OPENAI_COMPATIBLE provider (defaults to :dev).
+# mongot_image = "perconalab/percona-search-mongodb:dev"
+
+# Per-role sizing (models host larger for CPU embedding throughput).
+# instance_type_data   = "t3.medium"
+# instance_type_models = "t3.xlarge"
+# instance_type_app    = "t3.medium"
+
+# pmm_password = "admin"
