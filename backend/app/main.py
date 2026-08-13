@@ -3,6 +3,7 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pymongo.errors import PyMongoError
 
 from . import search as search_mod
@@ -18,6 +19,7 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=400)
 
 SearchType = Literal["fulltext", "vector", "hybrid"]
 
@@ -49,9 +51,15 @@ def models():
 def do_search(
     q: str = Query(..., min_length=1, description="Search query text."),
     type: SearchType = Query("fulltext", description="Search mode."),
-    model: str | None = Query(None, description="Embedding model / vector index for vector & hybrid."),
+    model: str | None = Query(
+        None, description="Embedding model / vector index for vector & hybrid."
+    ),
     limit: int = Query(5, ge=1, le=100),
 ):
+    q = " ".join(q.split())
+    if not q:
+        raise HTTPException(status_code=400, detail="q must not be empty")
+
     settings = get_settings()
     model = model or settings.default_model
 

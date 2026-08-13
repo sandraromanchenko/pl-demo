@@ -1,3 +1,97 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --ink: 20 36 28;
+  --mist: 232 240 234;
+  --pine: 31 77 58;
+  --fern: 47 107 79;
+  --butter: 232 197 71;
+  --clay: 196 92 58;
+  --paper: 247 250 247;
+  --line: 20 36 28;
+  --atmosphere:
+    radial-gradient(ellipse 90% 70% at 10% -10%, rgb(232 197 71 / 0.28), transparent 55%),
+    radial-gradient(ellipse 70% 60% at 95% 5%, rgb(47 107 79 / 0.22), transparent 50%),
+    radial-gradient(ellipse 80% 50% at 50% 110%, rgb(196 92 58 / 0.12), transparent 55%),
+    linear-gradient(165deg, #f3f7f3 0%, #e4eee7 45%, #d7e6dc 100%);
+}
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply m-0 min-h-screen bg-paper font-sans text-ink;
+    background-image: var(--atmosphere);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: rgb(var(--butter) / 0.45);
+    color: rgb(var(--ink));
+  }
+}
+
+@layer components {
+  .hex-grid {
+    background-image:
+      linear-gradient(rgb(var(--ink) / 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(var(--ink) / 0.035) 1px, transparent 1px);
+    background-size: 28px 28px;
+    mask-image: radial-gradient(ellipse 75% 65% at 50% 30%, black 20%, transparent 75%);
+  }
+
+  .search-shell {
+    @apply relative overflow-hidden rounded-2xl backdrop-blur-md;
+    border: 1px solid rgb(var(--line) / 0.12);
+    background-color: rgb(var(--paper) / 0.8);
+    box-shadow: 0 1px 0 rgb(var(--ink) / 0.05), 0 18px 40px rgb(var(--ink) / 0.1);
+  }
+
+  .search-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 3px;
+    background: linear-gradient(
+      90deg,
+      rgb(var(--pine)),
+      rgb(var(--butter)),
+      rgb(var(--clay))
+    );
+  }
+
+  .type-track {
+    @apply relative inline-grid grid-cols-3 rounded-xl p-1;
+    background-color: rgb(var(--mist) / 0.8);
+  }
+
+  .type-thumb {
+    @apply absolute inset-y-1 rounded-lg bg-pine transition-transform duration-300 ease-out;
+    width: calc(33.333% - 4px);
+    left: 4px;
+  }
+
+  .result-row {
+    @apply relative grid gap-4 py-5 transition-colors duration-200;
+    border-bottom: 1px solid rgb(var(--line) / 0.12);
+    grid-template-columns: 5.5rem 1fr;
+  }
+
+  .result-row:last-child {
+    border-bottom: 0;
+  }
+
+  .result-row:hover {
+    background: rgb(255 255 255 / 0.35);
+  }
+
+  @media (min-width: 640px) {
+    .result-row {
+      grid-template-columns: 6.5rem 1fr auto;
+    }
+  }
+}
