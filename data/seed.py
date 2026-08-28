@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Idempotent seed loader. Reads DATA_FILE (falls back to SAMPLE_FILE), builds a
-search_text field (name + description) for autoEmbed, inserts into an empty
-collection, then creates the full-text + per-model autoEmbed vector indexes and
-waits for READY. Safe to re-run; vector index creation is best-effort (needs a
-mongot with the OPENAI_COMPATIBLE provider)."""
+"""Idempotent seed loader, in two phases (SEED_PHASE):
+
+  data     documents + plain mongod indexes (rank, classic $text). Needs only
+           mongod, so it runs as soon as the database starts.
+  indexes  mongot full-text + per-model autoEmbed vector indexes, waiting for
+           READY. Needs mongot and a reachable embedding backend.
+  all      both (default).
+
+Reads DATA_FILE (default: sample_boardgames.ndjson) and builds a search_text field
+(name + description) for autoEmbed. Safe to re-run; vector index creation is
+best-effort (needs a mongot with the OPENAI_COMPATIBLE provider)."""
 import json
 import os
 import sys
@@ -19,6 +25,20 @@ from pymongo.errors import (
 
 # Retryable replset errors (shutdown / step-down / not-primary).
 TRANSIENT_CODES = {11600, 11602, 189, 91, 10107, 13435, 13436}
+
+# mongod without a mongotHost setting: search index commands do not exist. Its
+# own error is a wall of Atlas advice, so say what to do here instead.
+SEARCH_NOT_ENABLED = 31082
+SEARCH_NOT_ENABLED_HELP = (
+    "[seed] search is not enabled on this mongod (no mongotHost setting), so "
+    "search indexes cannot be created.\n"
+    "[seed] Start Percona Search and restart mongod with config/mongod.conf "
+    "first (demo/live.sh, or make demo-add-search)."
+)
+
+
+def _search_not_enabled(exc: PyMongoError) -> bool:
+    return getattr(exc, "code", None) == SEARCH_NOT_ENABLED
 
 
 def _is_transient(exc: PyMongoError) -> bool:
@@ -48,12 +68,12 @@ EMBED_MODELS = [
 ]
 VECTOR_INDEXES = {m: MODEL_INDEXES[m] for m in EMBED_MODELS}
 
-DATA_FILE = os.environ.get("DATA_FILE", "/work/data/boardgames.ndjson")
-SAMPLE_FILE = os.environ.get("SAMPLE_FILE", "/work/data/sample_boardgames.ndjson")
-# full = data/boardgames.ndjson (fallback sample); sample = the 20-game sample.
-DATASET = os.environ.get("DATASET", "sample").lower()
+DATA_FILE = os.environ.get("DATA_FILE", "/work/data/sample_boardgames.ndjson")
 SEED_DATA = os.environ.get("SEED_DATA", "true").lower() == "true"
 WAIT_INDEX_READY = os.environ.get("WAIT_INDEX_READY", "true").lower() == "true"
+# data = documents only (mongod), indexes = search indexes only (mongot), all = both.
+SEED_PHASES = ("all", "data", "indexes")
+SEED_PHASE = os.environ.get("SEED_PHASE", "all").lower()
 
 # Full-text index fields (explicit, not dynamic, for focused scoring).
 TEXT_FIELDS = ["name", "description", "categories", "mechanics"]
@@ -80,6 +100,8 @@ def create_search_index_retry(coll, spec, desc) -> bool:
             log(f"created {desc}")
             return True
         except OperationFailure as exc:
+            if _search_not_enabled(exc):
+                raise SystemExit(SEARCH_NOT_ENABLED_HELP)
             if _index_mgmt_unavailable(exc) and attempt < SEARCH_INDEX_RETRIES:
                 log(f"WARN {desc}: mongot not ready ({attempt}/{SEARCH_INDEX_RETRIES}): {exc}")
                 time.sleep(SEARCH_INDEX_DELAY)
@@ -96,13 +118,7 @@ def build_search_text(doc):
 
 
 def load_docs():
-    if DATASET == "sample":
-        path = SAMPLE_FILE
-    elif os.path.exists(DATA_FILE):
-        path = DATA_FILE
-    else:
-        log(f"DATASET=full but {DATA_FILE} missing; falling back to {SAMPLE_FILE}")
-        path = SAMPLE_FILE
+    path = DATA_FILE
     log(f"loading dataset from {path}")
     docs = []
     with open(path, "r", encoding="utf-8") as fh:
@@ -146,7 +162,7 @@ def insert_if_empty(coll, docs):
     if not docs:
         log("no documents to insert")
         return
-    # Batch inserts to bound memory on the 20k dataset.
+    # Batch inserts to bound memory.
     batch = 1000
     for i in range(0, len(docs), batch):
         coll.insert_many(docs[i : i + batch], ordered=False)
@@ -157,15 +173,30 @@ def existing_search_indexes(coll):
     try:
         return {idx["name"]: idx for idx in coll.list_search_indexes()}
     except OperationFailure as exc:
+        if _search_not_enabled(exc):
+            raise SystemExit(SEARCH_NOT_ENABLED_HELP)
         log(f"WARN could not list search indexes: {exc}")
         return {}
 
 
-def ensure_text_index(coll, existing):
-    if TEXT_INDEX in existing:
-        log(f"text index '{TEXT_INDEX}' already exists; skipping")
+def ensure_classic_text_index(coll):
+    """MongoDB's built-in text index ($text). One per collection."""
+    name = "text_idx"
+    existing = {idx["name"] for idx in coll.list_indexes()}
+    if name in existing:
+        log(f"classic text index '{name}' already exists; skipping")
         return
-    # lucene.english stems
+    coll.create_index(
+        [(field, "text") for field in TEXT_FIELDS],
+        name=name,
+        default_language="english",
+        weights={"name": 10, "description": 5, "categories": 3, "mechanics": 3},
+    )
+    log(f"created classic MongoDB text index '{name}' on {', '.join(TEXT_FIELDS)}")
+
+
+def ensure_text_index(coll, existing):
+    # lucene.english stems, so $search matches word variants (and fuzzy typos).
     definition = {
         "analyzer": "lucene.english",
         "searchAnalyzer": "lucene.english",
@@ -179,6 +210,9 @@ def ensure_text_index(coll, existing):
             },
         },
     }
+    if TEXT_INDEX in existing:
+        log(f"text index '{TEXT_INDEX}' already exists; skipping")
+        return
     create_search_index_retry(
         coll,
         {"name": TEXT_INDEX, "definition": definition},
@@ -187,6 +221,16 @@ def ensure_text_index(coll, existing):
 
 
 def ensure_vector_index(coll, existing, model, index_name):
+    definition = {
+        "fields": [
+            {
+                "type": "autoEmbed",
+                "path": "search_text",
+                "model": model,
+                "modality": "text",
+            },
+        ]
+    }
     if index_name in existing:
         status = existing[index_name].get("status")
         # FAILED usually means the model wasn't reachable at first seed; drop and
@@ -200,18 +244,10 @@ def ensure_vector_index(coll, existing, model, index_name):
                 log(f"WARN could not drop failed index '{index_name}': {exc}")
                 return
         else:
-            log(f"vector index '{index_name}' (model {model}) already exists ({status}); skipping")
+            log(
+                f"vector index '{index_name}' (model {model}) already exists ({status}); skipping"
+            )
             return
-    definition = {
-        "fields": [
-            {
-                "type": "autoEmbed",
-                "path": "search_text",
-                "model": model,
-                "modality": "text",
-            }
-        ]
-    }
     create_search_index_retry(
         coll,
         {"name": index_name, "type": "vectorSearch", "definition": definition},
@@ -228,6 +264,8 @@ def wait_ready(coll, names, timeout=600):
         try:
             status = {i["name"]: i.get("status") for i in coll.list_search_indexes()}
         except OperationFailure as exc:
+            if _search_not_enabled(exc):
+                raise SystemExit(SEARCH_NOT_ENABLED_HELP)
             log(f"WARN could not poll index status: {exc}")
             return
         # Every expected index must be present AND READY (a missing one means
@@ -245,40 +283,47 @@ def expected_indexes():
     return [TEXT_INDEX, *VECTOR_INDEXES.values()]
 
 
+def seed_documents(coll):
+    """Phase `data`: what a plain MongoDB deployment would already hold."""
+    # Parse the dataset only when inserting.
+    docs = load_docs() if coll.estimated_document_count() == 0 else []
+    insert_if_empty(coll, docs)
+    # btree index on rank for fast sort-by-rank.
+    coll.create_index([("rank", ASCENDING)], name="rank_idx")
+    ensure_classic_text_index(coll)
+
+
+def seed_search_indexes(coll):
+    """Phase `indexes`: everything that needs mongot (full-text + autoEmbed)."""
+    if coll.estimated_document_count() == 0:
+        log("WARN collection is empty; search indexes will have nothing to embed")
+    existing = existing_search_indexes(coll)
+    ensure_text_index(coll, existing)
+    for model, index_name in VECTOR_INDEXES.items():
+        ensure_vector_index(coll, existing, model, index_name)
+    wait_ready(coll, expected_indexes())
+
+
 def seed_once():
     client = connect()
     coll = client[MONGO_DB][MONGO_COLLECTION]
 
-    # No-op if data + all indexes already present (fresh volume re-seeds).
-    has_data = coll.estimated_document_count() > 0
-    existing = existing_search_indexes(coll)
-    indexes_ok = all(
-        name in existing and existing[name].get("status") != "FAILED"
-        for name in expected_indexes()
-    )
-    if has_data and indexes_ok:
-        log("already seeded (data + indexes present); nothing to do")
-        wait_ready(coll, expected_indexes())
-        return
-
-    # Parse the dataset only when inserting.
-    docs = load_docs() if not has_data else []
-    insert_if_empty(coll, docs)
-    # btree index on rank for fast sort-by-rank.
-    coll.create_index([("rank", ASCENDING)], name="rank_idx")
-
-    ensure_text_index(coll, existing)
-    for model, index_name in VECTOR_INDEXES.items():
-        ensure_vector_index(coll, existing, model, index_name)
-
-    wait_ready(coll, expected_indexes())
-    log("done")
+    if SEED_PHASE in ("all", "data"):
+        seed_documents(coll)
+    if SEED_PHASE in ("all", "indexes"):
+        seed_search_indexes(coll)
+    log(f"done (phase: {SEED_PHASE})")
 
 
 def main(attempts=10, delay=3):
+    if SEED_PHASE not in SEED_PHASES:
+        raise SystemExit(
+            f"SEED_PHASE='{SEED_PHASE}' invalid; use one of {', '.join(SEED_PHASES)}"
+        )
     if not SEED_DATA:
         log("SEED_DATA=false; skipping seeding")
         return
+    log(f"phase: {SEED_PHASE}")
     # Retry the idempotent seed on transient replset errors.
     for attempt in range(1, attempts + 1):
         try:

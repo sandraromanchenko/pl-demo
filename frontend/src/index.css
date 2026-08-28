@@ -1,3 +1,21 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  /* Everything is sized in rem, so this scales the whole UI for a projector
+     without touching individual components. 132% is the original 115% bumped
+     by a further 15% for back-of-room legibility. */
+  html {
+    font-size: 132%;
+  }
+
+  body {
+    @apply bg-brand-bg text-white;
+  }
+
+  /* Native dropdowns render light-on-light otherwise. */
+  select option {
+    @apply bg-brand-deep text-white;
+  }
+}

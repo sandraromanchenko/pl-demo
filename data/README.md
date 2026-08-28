@@ -1,9 +1,10 @@
 # Data directory
 
-The board-game dataset lives here as **`data/boardgames.ndjson`** (one JSON object per line)
-Pick which set the `seed` service loads with the **`DATASET`** env var:
-- `DATASET=sample` (default) → `data/sample_boardgames.ndjson`, 20 real games with the same schema, for a fast local run
-- `DATASET=full` → `data/boardgames.ndjson` (falls back to the sample if the file is missing)
+The seed loader reads **`data/sample_boardgames.ndjson`** (one JSON object per
+line): 50 games with full descriptions and cover art — BGG ranks 1–50, minus
+*Great Western Trail: Second Edition* (a near-duplicate of the rank-21 original)
+and plus *Zombicide* (rank 521), which gives the set a zombie/horror theme that
+nothing else in the top 50 covers. Lines are ordered by `rank`.
 
 ## Expected document schema
 
@@ -35,8 +36,4 @@ Each line is a single board game. `search_text` is **built by the seed loader**
 {"_id": 174430, "name": "Gloomhaven", "yearPublished": 2017, "description": "A cooperative campaign game...", "minPlayers": 1, "maxPlayers": 4, "playingTime": 120, "minAge": 14, "categories": ["Adventure"], "mechanics": ["Cooperative Game"], "designers": ["Isaac Childres"], "averageRating": 8.6, "rank": 1, "complexity": 3.9, "thumbnail": "https://.../gloomhaven.jpg"}
 ```
 
-### Descriptions
-
-In `boardgames.ndjson` the top ~2000 games have clean, readable one-line
-descriptions; the long tail keeps lemmatized/stripped text (fine for search,
-ugly for display).
+Descriptions are the full BoardGameGeek text for each game, cleaned of HTML.

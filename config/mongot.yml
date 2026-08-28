@@ -1,13 +1,10 @@
-# mongot: syncs from co-located mongod and embeds docs via the OpenAI-compatible
-# model catalog (rendered from embedding-service-configs.yml.tmpl).
-
 syncSource:
   replicaSet:
     hostAndPort: mongod:27017
     scramAuth:
-      username: __system
+      username: mongot
       passwordFile: /etc/mongot/secrets/passwordFile
-      authSource: local
+      authSource: admin
 
 storage:
   dataPath: /var/lib/mongot
@@ -19,7 +16,8 @@ server:
       mode: disabled
 
 metrics:
-  enabled: false
+  enabled: true
+  address: 0.0.0.0:9946
 
 healthCheck:
   address: 0.0.0.0:8080
@@ -27,8 +25,7 @@ healthCheck:
 logging:
   verbosity: INFO
 
-# Auto-embedding (enabled by this section); catalog rendered at container start.
+# Auto-embedding (enabled by this section); catalog rendered at container start
 embedding:
   modelConfigFile: /etc/mongot/embedding-service-configs.yml
-  # Single mongot must be the view writer/leader, else auto-embed indexes stay PENDING.
   isAutoEmbeddingViewWriter: true

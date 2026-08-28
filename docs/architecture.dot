@@ -1,0 +1,101 @@
+// pl-demo architecture: Application host -> Data host -> Models host
+// Regenerate with:  make diagram
+//   (dot -Tpng -Gdpi=160 docs/architecture.dot -o docs/architecture.png)
+digraph pl_demo {
+  rankdir=TB;
+  compound=true;
+  splines=spline;
+  bgcolor="white";
+  pad=0.35;
+  nodesep=0.5;
+  ranksep=0.8;
+  fontname="Helvetica";
+
+  node [shape=box, style="rounded,filled", fillcolor="white", penwidth=1.7,
+        fontname="Helvetica", fontsize=13, margin="0.26,0.16", height=0.66];
+  edge [fontname="Helvetica", fontsize=10.5, color="#64748B", fontcolor="#475569",
+        penwidth=1.4, arrowsize=0.8];
+
+  user [label=<<B>Browser</B>>, shape=box, style="rounded,filled",
+        fillcolor="#F1F5F9", color="#94A3B8", fontcolor="#334155"];
+
+  // ---------------- app host ----------------
+  subgraph cluster_app {
+    label="";
+    style="rounded,filled";
+    color="#E0AC08";
+    penwidth=2.2;
+    fillcolor="#FFFBEB";
+    margin=20;
+
+    t_app [shape=plaintext, style="", fillcolor="none",
+           label=<<B><FONT POINT-SIZE="20" COLOR="#8A6508">Application host</FONT></B>>];
+
+    fe [label=<<B>frontend</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">React + nginx &#183; :8081</FONT>>, color="#E0AC08"];
+    be [label=<<B>backend</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">FastAPI &#183; hybrid RRF &#183; :8000</FONT>>, color="#E0AC08"];
+    pmmsrv [label=<<B>pmm-server</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">monitoring UI &#183; :8443</FONT>>, color="#E0AC08"];
+
+    { rank=same; t_app; fe; pmmsrv; }
+    t_app -> fe [style=invis];
+    fe -> pmmsrv [style=invis];
+  }
+
+  // ---------------- data host ----------------
+  subgraph cluster_data {
+    label="";
+    style="rounded,filled";
+    color="#2F80C1";
+    penwidth=2.2;
+    fillcolor="#EFF6FF";
+    margin=20;
+
+    t_data [shape=plaintext, style="", fillcolor="none",
+            label=<<B><FONT POINT-SIZE="20" COLOR="#1F5F94">Data host</FONT></B>>];
+
+    mongod [label=<<B>Percona Server for MongoDB</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">:27017 &#183; documents + text index</FONT>>, color="#2F80C1"];
+    mongot [label=<<B>Percona Search for MongoDB</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">Lucene + auto-embedding &#183; :27028</FONT>>, color="#2F80C1"];
+    pmmcli [label=<<B>pmm-client</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">metrics agent</FONT>>, color="#2F80C1"];
+
+    { rank=same; t_data; mongod; pmmcli; }
+    { rank=same; mongot; }
+    t_data -> mongod [style=invis];
+    mongod -> pmmcli [style=invis];
+  }
+
+  // ---------------- models host ----------------
+  subgraph cluster_models {
+    label="";
+    style="rounded,filled";
+    color="#2E9E6B";
+    penwidth=2.2;
+    fillcolor="#ECFDF5";
+    margin=20;
+
+    t_models [shape=plaintext, style="", fillcolor="none",
+              label=<<B><FONT POINT-SIZE="20" COLOR="#1F7150">Models host</FONT></B>>];
+
+    tei [label=<<B>tei</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">bge-small &#183; 384d &#183; :8085</FONT>>, color="#2E9E6B"];
+    ollama [label=<<B>ollama</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">nomic-embed-text 768d<BR/>bge-m3 1024d &#183; :11434</FONT>>, color="#2E9E6B"];
+
+    { rank=same; t_models; tei; ollama; }
+    t_models -> tei [style=invis];
+    tei -> ollama [style=invis];
+  }
+
+  // request path
+  user -> fe [label="  HTTP  ", weight=10];
+  fe -> be [label="  /search  ", weight=10];
+  be -> mongod [label="  MONGO_URI  ", weight=8, penwidth=1.9, color="#2F80C1", fontcolor="#1F5F94"];
+
+  // search plane
+  mongod -> mongot [label="  gRPC :27028  ",
+                    dir=both, weight=20, penwidth=1.9, color="#2F80C1", fontcolor="#1F5F94"];
+
+  // embeddings
+  mongot -> tei [label="  TEI_URL  ", weight=4, penwidth=1.9, color="#2E9E6B", fontcolor="#1F7150"];
+  mongot -> ollama [label="  OLLAMA_URL  ", weight=4, penwidth=1.9, color="#2E9E6B", fontcolor="#1F7150"];
+
+  // monitoring
+  mongot -> pmmcli [style=dotted, color="#94A3B8", constraint=false];
+  pmmcli -> pmmsrv [style=dotted, color="#94A3B8", label="  metrics  ", fontcolor="#7C8899", constraint=false];
+}

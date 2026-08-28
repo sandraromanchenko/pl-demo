@@ -20,8 +20,12 @@ export function fetchModels() {
   return getJSON("/models");
 }
 
+export function fetchGames({ limit = 100 } = {}) {
+  return getJSON(`/games?limit=${limit}`);
+}
+
 export function search({ q, type, model, limit = 5 }) {
   const params = new URLSearchParams({ q, type, limit: String(limit) });
-  if (model && type !== "fulltext") params.set("model", model);
+  if (model && (type === "vector" || type === "hybrid")) params.set("model", model);
   return getJSON(`/search?${params.toString()}`);
 }

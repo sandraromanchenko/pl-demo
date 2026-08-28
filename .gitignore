@@ -1,9 +1,11 @@
 # Ignore raw CSV inputs if present
 data/*.csv
 data/*.ndjson
-!data/boardgames.ndjson
 !data/sample_boardgames.ndjson
 data/*.json
+
+# Demo runbook
+demo/README.md
 
 # Local env files (only *.example / env/*.env templates are committed)
 .env

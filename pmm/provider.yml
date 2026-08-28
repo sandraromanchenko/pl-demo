@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: Percona Search
+    orgId: 1
+    folder: Percona Search
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/percona-search

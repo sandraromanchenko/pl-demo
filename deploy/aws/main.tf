@@ -101,22 +101,23 @@ resource "aws_network_interface" "app" {
 }
 
 # ---- EIPs: public reachability (SSH/egress for all; web on app) -------------
+# Allocated without an attachment so the app host's public IP is known before
+# its user_data is rendered. Association is a separate resource below, because
+# AssociateAddress rejects an ENI whose instance is still pending-instance-
+# creation, and the allocation cannot depend on the instance without a cycle.
 resource "aws_eip" "data" {
-  domain            = "vpc"
-  network_interface = aws_network_interface.data.id
-  tags              = { Name = "pl-demo-data", "iit-billing-tag" = var.billing_tag }
+  domain = "vpc"
+  tags   = { Name = "pl-demo-data", "iit-billing-tag" = var.billing_tag }
 }
 
 resource "aws_eip" "models" {
-  domain            = "vpc"
-  network_interface = aws_network_interface.models.id
-  tags              = { Name = "pl-demo-models", "iit-billing-tag" = var.billing_tag }
+  domain = "vpc"
+  tags   = { Name = "pl-demo-models", "iit-billing-tag" = var.billing_tag }
 }
 
 resource "aws_eip" "app" {
-  domain            = "vpc"
-  network_interface = aws_network_interface.app.id
-  tags              = { Name = "pl-demo-app", "iit-billing-tag" = var.billing_tag }
+  domain = "vpc"
+  tags   = { Name = "pl-demo-app", "iit-billing-tag" = var.billing_tag }
 }
 
 # ---- Per-role .env contents (cross-host endpoints resolved from ENI IPs) -----
@@ -130,7 +131,7 @@ locals {
     PMM_SERVER=${aws_network_interface.app.private_ip}
     PMM_SERVER_PORT=${local.pmm_port}
     PMM_USERNAME=admin
-    PMM_PASSWORD=${var.pmm_password}
+    PMM_PASSWORD=admin1
     MONGO_HOST=mongod
     MONGO_ADMIN_USER=root
     MONGO_ADMIN_PASSWORD=root
@@ -147,12 +148,11 @@ locals {
     MONGO_COLLECTION=games
     TEXT_INDEX=text_index
     EMBED_MODELS=${var.embed_models}
-    DEFAULT_MODEL=bge-small
-    DATASET=${var.dataset}
     VITE_API_BASE=http://${aws_eip.app.public_ip}:8000
     FRONTEND_PORT=80
     PMM_HTTP_PORT=${local.pmm_port}
-    PMM_PASSWORD=${var.pmm_password}
+    PMM_PASSWORD=admin1
+    DATA_PRIVATE_IP=${aws_network_interface.data.private_ip}
     SEED_DATA=true
   EOT
 }
@@ -178,6 +178,7 @@ resource "aws_instance" "data" {
     env_content = local.data_env
     repo_url    = var.repo_url
     repo_branch = var.repo_branch
+    auto_start  = var.auto_start
   })
 
   tags = { Name = "pl-demo-data", "iit-billing-tag" = var.billing_tag }
@@ -203,6 +204,7 @@ resource "aws_instance" "models" {
     env_content = local.models_env
     repo_url    = var.repo_url
     repo_branch = var.repo_branch
+    auto_start  = var.auto_start
   })
 
   tags = { Name = "pl-demo-models", "iit-billing-tag" = var.billing_tag }
@@ -228,7 +230,31 @@ resource "aws_instance" "app" {
     env_content = local.app_env
     repo_url    = var.repo_url
     repo_branch = var.repo_branch
+    auto_start  = var.auto_start
   })
 
   tags = { Name = "pl-demo-app", "iit-billing-tag" = var.billing_tag }
+}
+
+# ---- EIP associations -------------------------------------------------------
+# aws_instance creation blocks until the instance reaches `running`, so keying
+# these off instance_id is what keeps AssociateAddress off a pending instance.
+# allow_reassociation lets an apply converge when the address is already
+# attached, e.g. state written before the allocation and association were split.
+resource "aws_eip_association" "data" {
+  allocation_id       = aws_eip.data.allocation_id
+  instance_id         = aws_instance.data.id
+  allow_reassociation = true
+}
+
+resource "aws_eip_association" "models" {
+  allocation_id       = aws_eip.models.allocation_id
+  instance_id         = aws_instance.models.id
+  allow_reassociation = true
+}
+
+resource "aws_eip_association" "app" {
+  allocation_id       = aws_eip.app.allocation_id
+  instance_id         = aws_instance.app.id
+  allow_reassociation = true
 }
