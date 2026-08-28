@@ -68,7 +68,7 @@ services:
   mongot:
     image: ${MONGOT_IMAGE:-perconalab/percona-search-mongodb:dev}
     profiles: ["data"]
-    user: "0"
+    user: "1001:0"
     hostname: mongot
     # Renders the embedding catalog template (${TEI_URL}/${OLLAMA_URL}).
     environment:
@@ -78,14 +78,13 @@ services:
       - bash
       - -ec
       - |
-        install -d -m 0750 -o mongodb -g root /etc/mongot/secrets
-        install -m 0400 -o mongodb -g root /mnt/keyfile /etc/mongot/secrets/passwordFile
-        chown -R mongodb:0 /var/lib/mongot
+        install -d -m 0750 /etc/mongot/secrets
+        install -m 0400 /mnt/keyfile /etc/mongot/secrets/passwordFile
         sed -e 's|$${TEI_URL}|'"$$TEI_URL"'|g' \
             -e 's|$${OLLAMA_URL}|'"$$OLLAMA_URL"'|g' \
             /etc/mongot/embedding-service-configs.yml.tmpl \
             > /etc/mongot/embedding-service-configs.yml
-        exec setpriv --reuid=1001 --regid=0 --init-groups /entrypoint.sh mongot --config /etc/mongot/mongot.yml
+        exec /entrypoint.sh mongot --config /etc/mongot/mongot.yml
     ports:
       - "27028:27028"
       - "8080:8080"
@@ -101,7 +100,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "curl -fsS http://127.0.0.1:8080/ready >/dev/null || exit 1",
+          "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080'",
         ]
       interval: 5s
       timeout: 5s
