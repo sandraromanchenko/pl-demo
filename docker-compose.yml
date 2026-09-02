@@ -3,12 +3,11 @@ name: pl-demo
 # Local: run all profiles on one host (cross-host env vars default to service
 # names). AWS: each host runs ONE profile with .env pointing at the others' IPs.
 # Profiles: data (mongod, mongot, pmm-client) / models (tei, ollama) /
-# app (backend, frontend, seed one-shot, pmm-server).
+# app (backend, frontend, pmm-server) / seed (one-shot loader)
 
 services:
-  # ---------------------------------------------------------------- data profile
   mongod:
-    image: ${MONGOD_IMAGE:-perconalab/percona-server-mongodb:8.3.4-1}
+    image: ${MONGOD_IMAGE:-percona/percona-server-mongodb:8.3.8}
     profiles: ["data"]
     user: "0"
     hostname: mongod
@@ -18,6 +17,9 @@ services:
       - |
         install -d -m 0750 -o mongodb -g root /etc/mongodb
         install -m 0400 -o mongodb -g root /mnt/keyfile /etc/mongodb/keyfile
+        install -m 0400 -o mongodb -g root /mnt/mongot-password /etc/mongodb/mongot-password
+        install -m 0400 -o mongodb -g root /mnt/dba-password /etc/mongodb/dba-password
+        install -m 0755 /mnt/dba-mongosh.sh /usr/local/bin/dba-mongosh
         chown -R mongodb:0 /var/lib/mongo
         if [ ! -f /var/lib/mongo/.replset-init ]; then
           gosu mongodb:1001 /entrypoint.sh mongod --config /etc/mongod.conf &
@@ -36,12 +38,43 @@ services:
           wait "$$pid"
           touch /var/lib/mongo/.replset-init
         fi
-        exec gosu mongodb:1001 /entrypoint.sh mongod --config /etc/mongod.conf
+        gosu mongodb:1001 /entrypoint.sh mongod --config /etc/mongod.conf &
+        pid=$$!
+        trap 'kill -TERM "$$pid"; wait "$$pid"' TERM INT
+        until mongosh -u root -p root --authenticationDatabase admin --quiet --eval 'db.hello().isWritablePrimary' >/dev/null 2>&1; do sleep 1; done
+        mongot_pwd=$$(tr -d '\n' < /etc/mongodb/mongot-password)
+        dba_pwd=$$(tr -d '\n' < /etc/mongodb/dba-password)
+        mongosh -u root -p root --authenticationDatabase admin --quiet --eval "
+          const admin = db.getSiblingDB('admin');
+          const existing = (admin.getUsers().users || []).map(u => u.user);
+          const wanted = [
+            {
+              user: 'mongot',
+              pwd: '$${mongot_pwd}',
+              roles: [{ role: 'searchCoordinator', db: 'admin' }]
+            },
+            {
+              user: 'dba',
+              pwd: '$${dba_pwd}',
+              roles: [
+                { role: 'readWriteAnyDatabase', db: 'admin' },
+                { role: 'clusterMonitor', db: 'admin' }
+              ]
+            }
+          ];
+          for (const spec of wanted) {
+            if (!existing.includes(spec.user)) admin.createUser(spec);
+          }
+        "
+        wait "$$pid"
     ports:
       - "27017:27017"
     volumes:
-      - ./config/mongod.conf:/etc/mongod.conf:ro
+      - ./config/${MONGOD_CONF:-mongod.conf}:/etc/mongod.conf:ro
       - ./config/keyfile:/mnt/keyfile:ro
+      - ./config/mongot-password:/mnt/mongot-password:ro
+      - ./config/dba-password:/mnt/dba-password:ro
+      - ./config/dba-mongosh.sh:/mnt/dba-mongosh.sh:ro
       - mongod_data:/var/lib/mongo
     healthcheck:
       test:
@@ -66,11 +99,10 @@ services:
       - pl-demo
 
   mongot:
-    image: ${MONGOT_IMAGE:-perconalab/percona-search-mongodb:dev}
+    image: ${MONGOT_IMAGE:-percona/percona-search-mongodb:1.70.4}
     profiles: ["data"]
     user: "1001:0"
     hostname: mongot
-    # Renders the embedding catalog template (${TEI_URL}/${OLLAMA_URL}).
     environment:
       TEI_URL: ${TEI_URL:-http://tei:80}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
@@ -79,7 +111,7 @@ services:
       - -ec
       - |
         install -d -m 0750 /etc/mongot/secrets
-        install -m 0400 /mnt/keyfile /etc/mongot/secrets/passwordFile
+        install -m 0400 /mnt/mongot-password /etc/mongot/secrets/passwordFile
         sed -e 's|$${TEI_URL}|'"$$TEI_URL"'|g' \
             -e 's|$${OLLAMA_URL}|'"$$OLLAMA_URL"'|g' \
             /etc/mongot/embedding-service-configs.yml.tmpl \
@@ -88,14 +120,12 @@ services:
     ports:
       - "27028:27028"
       - "8080:8080"
+      - "9946:9946"
     volumes:
       - ./config/mongot.yml:/etc/mongot/mongot.yml:ro
       - ./config/embedding-service-configs.yml.tmpl:/etc/mongot/embedding-service-configs.yml.tmpl:ro
-      - ./config/keyfile:/mnt/keyfile:ro
+      - ./config/mongot-password:/mnt/mongot-password:ro
       - mongot_data:/var/lib/mongot
-    depends_on:
-      mongod:
-        condition: service_healthy
     healthcheck:
       test:
         [
@@ -109,9 +139,8 @@ services:
     networks:
       - pl-demo
 
-  # PMM client sidecar: registers mongod with the PMM server on the app host.
   pmm-client:
-    image: ${PMM_CLIENT_IMAGE:-percona/pmm-client:2}
+    image: ${PMM_CLIENT_IMAGE:-percona/pmm-client:3}
     profiles: ["data"]
     hostname: pmm-client
     depends_on:
@@ -119,9 +148,9 @@ services:
         condition: service_healthy
     environment:
       PMM_SERVER: ${PMM_SERVER:-pmm-server}
-      PMM_SERVER_PORT: ${PMM_SERVER_PORT:-443}
+      PMM_SERVER_PORT: ${PMM_SERVER_PORT:-8443}
       PMM_USERNAME: ${PMM_USERNAME:-admin}
-      PMM_PASSWORD: ${PMM_PASSWORD:-admin}
+      PMM_PASSWORD: ${PMM_PASSWORD:-admin1}
       MONGO_HOST: ${MONGO_HOST:-mongod}
       MONGO_ADMIN_USER: ${MONGO_ADMIN_USER:-root}
       MONGO_ADMIN_PASSWORD: ${MONGO_ADMIN_PASSWORD:-root}
@@ -129,31 +158,59 @@ services:
       - /bin/bash
       - -ec
       - |
-        CFG=/usr/local/percona/pmm2/config/pmm-agent.yaml
-        pmm-agent setup \
-          --config-file="$$CFG" \
-          --server-address="$$PMM_SERVER:$$PMM_SERVER_PORT" \
-          --server-insecure-tls \
-          --server-username="$$PMM_USERNAME" \
-          --server-password="$$PMM_PASSWORD" \
-          --paths-tempdir=/tmp >/tmp/pmm-setup.log 2>&1 || true
+        CFG=/usr/local/percona/pmm/config/pmm-agent.yaml
+        until pmm-agent setup \
+            --config-file="$$CFG" \
+            --server-address="$$PMM_SERVER:$$PMM_SERVER_PORT" \
+            --server-insecure-tls \
+            --server-username="$$PMM_USERNAME" \
+            --server-password="$$PMM_PASSWORD" \
+            --force \
+            --paths-tempdir=/tmp >/tmp/pmm-setup.log 2>&1; do
+          # Retrying only helps while the server is still booting. Bad
+          # credentials never fix themselves, so say so instead of looping
+          # quietly and leaving pmm-admin to fail on a refused 127.0.0.1:7777.
+          if grep -qi 'invalid username or password' /tmp/pmm-setup.log; then
+            echo "pmm-agent setup rejected PMM_USERNAME/PMM_PASSWORD for $$PMM_SERVER:$$PMM_SERVER_PORT." >&2
+            echo "Expected admin/admin1. Re-assert with 'make prestart-pmm-password'." >&2
+          else
+            echo "waiting for PMM server at $$PMM_SERVER:$$PMM_SERVER_PORT"
+          fi
+          sleep 5
+        done
         pmm-agent --config-file="$$CFG" &
         pid=$$!
+        trap 'kill -TERM "$$pid" 2>/dev/null; wait' TERM INT
         until pmm-admin status >/dev/null 2>&1; do sleep 2; done
-        pmm-admin add mongodb \
-          --username="$$MONGO_ADMIN_USER" --password="$$MONGO_ADMIN_PASSWORD" \
-          --host="$$MONGO_HOST" --port=27017 \
-          --service-name=boardgames-mongod || true
+        # `pmm-admin status` reports connected slightly before the server will
+        # accept a service, so a single add loses the race and used to be
+        # swallowed by `|| true`, silently leaving mongod unmonitored. Retry
+        # until the service is listed, then report the last error if it never is.
+        for i in $$(seq 1 40); do
+          pmm-admin list 2>/dev/null | grep -q boardgames-mongod && break
+          pmm-admin add mongodb \
+            --username="$$MONGO_ADMIN_USER" --password="$$MONGO_ADMIN_PASSWORD" \
+            --host="$$MONGO_HOST" --port=27017 \
+            --service-name=boardgames-mongod >/tmp/pmm-add-mongodb.log 2>&1
+          sleep 3
+        done
+        pmm-admin list 2>/dev/null | grep -q boardgames-mongod || {
+          echo "pmm-admin add mongodb never succeeded; last error:" >&2
+          cat /tmp/pmm-add-mongodb.log >&2
+        }
         wait $$pid
     networks:
       - pl-demo
 
-  # -------------------------------------------------------------- models profile
   tei:
     image: ${TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9}
     profiles: ["models"]
     hostname: tei
-    command: ["--model-id", "${TEI_MODEL_ID:-BAAI/bge-small-en-v1.5}"]
+    command:
+      - "--model-id"
+      - "${TEI_MODEL_ID:-BAAI/bge-small-en-v1.5}"
+      - "--max-client-batch-size"
+      - "96"
     ports:
       - "8085:80"
     volumes:
@@ -192,12 +249,10 @@ services:
     networks:
       - pl-demo
 
-  # ----------------------------------------------------------------- app profile
   backend:
     build:
       context: ./backend
     image: ${BACKEND_IMAGE:-pl-demo-backend:latest}
-    # Locally built image: always build, never pull.
     pull_policy: build
     profiles: ["app"]
     hostname: backend
@@ -206,9 +261,7 @@ services:
       MONGO_DB: ${MONGO_DB:-boardgames}
       MONGO_COLLECTION: ${MONGO_COLLECTION:-games}
       TEXT_INDEX: ${TEXT_INDEX:-text_index}
-      # Enabled models (comma-separated); drives /models and the vector indexes.
       EMBED_MODELS: ${EMBED_MODELS:-bge-small}
-      DEFAULT_MODEL: ${DEFAULT_MODEL:-bge-small}
     ports:
       - "8000:8000"
     networks:
@@ -218,10 +271,8 @@ services:
     build:
       context: ./frontend
       args:
-        # Baked into the bundle at build time (app host's public backend URL on AWS).
         VITE_API_BASE: ${VITE_API_BASE:-http://localhost:8000}
     image: ${FRONTEND_IMAGE:-pl-demo-frontend:latest}
-    # Locally built image: always build, never pull.
     pull_policy: build
     profiles: ["app"]
     hostname: frontend
@@ -232,10 +283,9 @@ services:
     networks:
       - pl-demo
 
-  # One-shot loader: inserts games and creates the text + vector indexes.
   seed:
     image: ${SEED_IMAGE:-python:3.12-slim}
-    profiles: ["app"]
+    profiles: ["seed"]
     restart: "no"
     environment:
       MONGO_URI: ${MONGO_URI:-mongodb://root:root@mongod:27017/?authSource=admin&directConnection=true}
@@ -243,11 +293,12 @@ services:
       MONGO_COLLECTION: ${MONGO_COLLECTION:-games}
       TEXT_INDEX: ${TEXT_INDEX:-text_index}
       EMBED_MODELS: ${EMBED_MODELS:-bge-small}
-      DATASET: ${DATASET:-sample}
-      DATA_FILE: /work/data/boardgames.ndjson
-      SAMPLE_FILE: /work/data/sample_boardgames.ndjson
+      DATA_FILE: /work/data/sample_boardgames.ndjson
       SEED_DATA: ${SEED_DATA:-true}
       WAIT_INDEX_READY: ${WAIT_INDEX_READY:-true}
+      SEED_PHASE: ${SEED_PHASE:-all}
+      PIP_ROOT_USER_ACTION: ignore
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
     entrypoint:
       - /bin/bash
       - -ec
@@ -259,15 +310,24 @@ services:
     networks:
       - pl-demo
 
-  # PMM server web UI (runs on the app host).
   pmm-server:
-    image: ${PMM_SERVER_IMAGE:-percona/pmm-server:2}
+    image: ${PMM_SERVER_IMAGE:-percona/pmm-server:3}
     profiles: ["app"]
     hostname: pmm-server
+    environment:
+      # `make prestart` re-asserts admin1 so a UI password change cannot leave
+      # pmm-client unable to register.
+      PMM_PASSWORD: ${PMM_PASSWORD:-admin1}
     ports:
-      - "${PMM_HTTP_PORT:-8443}:443"
+      # PMM 3 serves HTTPS on 8443 internally (443/80 in PMM 2), so the
+      # published port is unchanged but the target moved.
+      - "${PMM_HTTP_PORT:-8443}:8443"
+    extra_hosts:
+      - "mongot:${DATA_PRIVATE_IP:-host-gateway}"
     volumes:
       - pmm_data:/srv
+      - ./pmm/provider.yml:/usr/share/grafana/conf/provisioning/dashboards/percona-search.yml:ro
+      - ./pmm/dashboards:/var/lib/grafana/percona-search:ro
     networks:
       - pl-demo
 

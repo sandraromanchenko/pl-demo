@@ -1,6 +1,13 @@
 #!/bin/bash
 # Per-host bootstrap: install Docker, clone the repo, write the role .env
-# (cross-host IPs interpolated by Terraform), bring up the matching profile.
+# (cross-host IPs interpolated by Terraform). Default (auto_start=false) is
+# the presentation flow (demo/README.md):
+#
+#   app     - frontend + backend + PMM up and stay up (no seed: no data yet)
+#   data    - images pulled, mongod/mongot NOT started (live demo steps)
+#   models  - images pulled, weights downloaded into the volumes, then stopped
+#
+# auto_start=true starts data + models and seeds so the UI is usable after boot.
 set -euxo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -17,6 +24,9 @@ apt-get update
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 systemctl enable --now docker
 
+# The presenter drives compose over SSH as `ubuntu`, so no sudo is needed.
+usermod -aG docker ubuntu
+
 # Fetch the demo repo.
 rm -rf /opt/pl-demo
 git clone --branch "${repo_branch}" --depth 1 "${repo_url}" /opt/pl-demo
@@ -27,5 +37,33 @@ cat > .env <<'PL_DEMO_ENV'
 ${env_content}
 PL_DEMO_ENV
 
-# Start this host's profile (--build for the local app images).
-docker compose --profile ${role} up -d --build
+chown -R ubuntu:ubuntu /opt/pl-demo
+
+# Default: presentation pre-demo state. auto_start=true brings the full stack
+# up (seed retries until mongod/mongot are reachable from the other hosts).
+case "${role}" in
+  app)
+    # Long-running app layer. Pull seed too: indexes are created from this host.
+    docker compose --profile app pull pmm-server
+    docker compose --profile seed pull seed
+    docker compose --profile app up -d --build backend frontend pmm-server
+    if [ "${auto_start}" = "true" ]; then
+      docker compose --profile seed run --rm -T seed
+    fi
+    ;;
+  data)
+    docker compose --profile data pull
+    if [ "${auto_start}" = "true" ]; then
+      docker compose --profile data up -d
+    fi
+    ;;
+  models)
+    if [ "${auto_start}" = "true" ]; then
+      docker compose --profile models pull
+      demo/models.sh start
+    else
+      # Weights cached; backends stopped so the live start is seconds.
+      demo/models.sh warm
+    fi
+    ;;
+esac

@@ -21,6 +21,17 @@ variable "key_name" {
   type        = string
 }
 
+variable "ssh_key_path" {
+  description = "Absolute path to the private key for key_name. Set it unless the key is in your ssh-agent; the aws_env output then adds `-i <path>` so demo/run.sh can connect. Use $HOME, not ~."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.ssh_key_path == "" || !startswith(var.ssh_key_path, "~")
+    error_message = "ssh_key_path must be absolute: demo/run.sh word-splits DEMO_SSH_OPTS, so a leading ~ reaches ssh unexpanded."
+  }
+}
+
 variable "web_ingress_cidr" {
   description = "CIDR allowed to reach the public web (frontend/backend/PMM UI) on the app host."
   type        = string
@@ -79,13 +90,7 @@ variable "repo_branch" {
 variable "mongot_image" {
   description = "mongot image WITH the OPENAI_COMPATIBLE provider (auto-embedding)."
   type        = string
-  default     = "perconalab/percona-search-mongodb:dev"
-}
-
-variable "pmm_password" {
-  description = "PMM server admin password (also used by pmm-client to register)."
-  type        = string
-  default     = "admin"
+  default     = "percona/percona-search-mongodb:1.70.4"
 }
 
 variable "embed_models" {
@@ -94,8 +99,8 @@ variable "embed_models" {
   default     = "bge-small"
 }
 
-variable "dataset" {
-  description = "Dataset to seed: full (data/boardgames.ndjson) or sample (20 games)."
-  type        = string
-  default     = "sample"
+variable "auto_start" {
+  description = "If true, user_data starts data + models and seeds indexes so the UI is usable after boot. Default false keeps the presentation pre-demo state (images pulled, search not running)."
+  type        = bool
+  default     = false
 }

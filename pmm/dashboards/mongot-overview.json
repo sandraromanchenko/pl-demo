@@ -1,0 +1,1219 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": [],
+      "title": "Status",
+      "type": "row"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Whether mongot finished startup and is serving queries.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "NOT READY"
+                },
+                "1": {
+                  "color": "green",
+                  "text": "SERVING"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 26
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_readiness_lifecycleInitialized)",
+          "legendFormat": "Mongot",
+          "refId": "A"
+        }
+      ],
+      "title": "Mongot",
+      "type": "stat"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Search indexes mongot knows about. NONE means none has been created yet.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "orange",
+                  "text": "NONE"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 26
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "sum(mongot_configState_indexesInCatalog)",
+          "legendFormat": "Indexes",
+          "refId": "A"
+        }
+      ],
+      "title": "Indexes",
+      "type": "stat"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Indexes past initial sync and following the change stream, so queries against them return complete results.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 26
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "(sum(mongot_replicationIndexManager_transitionState_total{toState=\"STEADY_STATE\"}) or vector(0)) - (sum(mongot_replicationIndexManager_transitionState_total{fromState=\"STEADY_STATE\"}) or vector(0))",
+          "legendFormat": "Ready",
+          "refId": "A"
+        }
+      ],
+      "title": "Ready",
+      "type": "stat"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Indexes still backfilling. Queries against these return partial results until the build finishes.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 26
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "(sum(mongot_replicationIndexManager_transitionState_total{toState=\"INITIAL_SYNC\"}) or vector(0)) - (sum(mongot_replicationIndexManager_transitionState_total{fromState=\"INITIAL_SYNC\"}) or vector(0))",
+          "legendFormat": "Building",
+          "refId": "A"
+        }
+      ],
+      "title": "Building",
+      "type": "stat"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Worst lag across indexes. This is the number that tells you whether search results are stale.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "yellow",
+                "value": 5000
+              },
+              {
+                "color": "red",
+                "value": 30000
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 26
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_index_stats_indexing_replicationLagMs)",
+          "legendFormat": "Max replication lag",
+          "refId": "A"
+        }
+      ],
+      "title": "Max replication lag",
+      "type": "stat"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Whether this mongot owns materialized-view writes for autoEmbed indexes. Exactly one node in the replica set should be LEADER.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "blue",
+                  "text": "FOLLOWER"
+                },
+                "1": {
+                  "color": "green",
+                  "text": "LEADER"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "id": 7,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {
+          "valueSize": 26
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_embedding_materializedView_stats_leaderStatus)",
+          "legendFormat": "Embedding writer",
+          "refId": "A"
+        }
+      ],
+      "title": "Embedding writer",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 8,
+      "panels": [],
+      "title": "Indexes & replication",
+      "type": "row"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Index builds as they happen: INITIALIZING -> INITIAL_SYNC -> STEADY_STATE. Read this rather than the Building stat for short builds, because a small collection can finish between scrapes while the counters always record it.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "sum by (fromState, toState) (increase(mongot_replicationIndexManager_transitionState_total[$__rate_interval]))",
+          "legendFormat": "index: {{fromState}} -> {{toState}}",
+          "refId": "A"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum by (fromState, toState) (increase(mongot_materializedViewGenerator_transitionState_total[$__rate_interval]))",
+          "legendFormat": "matview: {{fromState}} -> {{toState}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Index lifecycle",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "How far behind mongod each index is. A series existing at all means that index is live in mongot.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
+          "min": 0,
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "mongot_index_stats_indexing_replicationLagMs",
+          "legendFormat": "{{indexType}}",
+          "refId": "A"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "mongot_embedding_materializedView_stats_indexing_replicationLagMs",
+          "legendFormat": "matview {{indexType}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Replication lag per index",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Documents being applied to indexes. Flat at zero while writes are happening means indexing is stuck.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
+          "min": 0,
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "sum by (indexType) (rate(mongot_index_stats_indexing_insert_total[$__rate_interval]))",
+          "legendFormat": "insert - {{indexType}}",
+          "refId": "A"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum by (indexType) (rate(mongot_index_stats_indexing_update_total[$__rate_interval]))",
+          "legendFormat": "update - {{indexType}}",
+          "refId": "B"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum by (indexType) (rate(mongot_index_stats_indexing_delete_total[$__rate_interval]))",
+          "legendFormat": "delete - {{indexType}}",
+          "refId": "C"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum(rate(mongot_index_stats_indexing_vectorFieldsIndexed_total[$__rate_interval]))",
+          "legendFormat": "vector fields embedded",
+          "refId": "D"
+        }
+      ],
+      "title": "Indexing throughput",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 12,
+      "panels": [],
+      "title": "Queries",
+      "type": "row"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Query rate by command, with failures on the same axis for comparison.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
+          "min": 0,
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "sum(rate(mongot_command_searchCommandTotalLatency_seconds_count[$__rate_interval]))",
+          "legendFormat": "$search",
+          "refId": "A"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum(rate(mongot_command_vectorSearchCommandTotalLatency_seconds_count[$__rate_interval]))",
+          "legendFormat": "$vectorSearch",
+          "refId": "B"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum by (indexType) (rate(mongot_index_stats_query_failedQueries_total[$__rate_interval]))",
+          "legendFormat": "failed - {{indexType}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Query throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "$vectorSearch includes embedding the query text, so a slow embedding provider shows up here and not in $search.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
+          "min": 0,
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_command_searchCommandTotalLatency_seconds{quantile=\"0.99\"})",
+          "legendFormat": "$search p99",
+          "refId": "A"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_command_searchCommandTotalLatency_seconds{quantile=\"0.5\"})",
+          "legendFormat": "$search p50",
+          "refId": "B"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_command_vectorSearchCommandTotalLatency_seconds{quantile=\"0.99\"})",
+          "legendFormat": "$vectorSearch p99",
+          "refId": "C"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_command_vectorSearchCommandTotalLatency_seconds{quantile=\"0.5\"})",
+          "legendFormat": "$vectorSearch p50",
+          "refId": "D"
+        }
+      ],
+      "title": "Query latency",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "id": 15,
+      "panels": [],
+      "title": "Embedding provider",
+      "type": "row"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Calls to the embedding endpoint. CHANGE_STREAM and COLLECTION_SCAN are indexing; QUERY is $vectorSearch embedding the search text. Sustained retries mean the provider is rate limiting or flaky.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
+          "min": 0,
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "sum by (workload) (rate(mongot_embeddingServiceManager_successfulRequests_total[$__rate_interval]))",
+          "legendFormat": "ok - {{workload}}",
+          "refId": "A"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum by (workload) (rate(mongot_embeddingServiceManager_failedRequests_total[$__rate_interval]))",
+          "legendFormat": "failed - {{workload}}",
+          "refId": "B"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum(rate(mongot_embeddingServiceManager_retriedAttempts_total[$__rate_interval]))",
+          "legendFormat": "retried attempts",
+          "refId": "C"
+        }
+      ],
+      "title": "Embedding requests",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Round trip to the embedding endpoint. The client timeout is 60s, so values approaching that mean requests are about to fail.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
+          "min": 0,
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_embeddingServiceManager_requestLatency_seconds{quantile=\"0.99\"})",
+          "legendFormat": "p99",
+          "refId": "A"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_embeddingServiceManager_requestLatency_seconds{quantile=\"0.5\"})",
+          "legendFormat": "p50",
+          "refId": "B"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_embeddingServiceManager_requestLatency_seconds_max)",
+          "legendFormat": "max",
+          "refId": "C"
+        }
+      ],
+      "title": "Embedding latency",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "id": 18,
+      "panels": [],
+      "title": "Health",
+      "type": "row"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Everything that failed, in one place. Flat at zero is the healthy state.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
+      "id": 19,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "sum(increase(mongot_command_searchCommandFailure_total[$__rate_interval]))",
+          "legendFormat": "$search failures",
+          "refId": "A"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum(increase(mongot_command_vectorSearchCommandFailure_total[$__rate_interval]))",
+          "legendFormat": "$vectorSearch failures",
+          "refId": "B"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum(increase(mongot_command_manageSearchIndexCommandFailure_total[$__rate_interval]))",
+          "legendFormat": "index management failures",
+          "refId": "C"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum(increase(mongot_embeddingServiceManager_failedRequests_total[$__rate_interval]))",
+          "legendFormat": "embedding failures",
+          "refId": "D"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum(increase(mongot_index_stats_indexing_steadyStateExceptions_total[$__rate_interval]))",
+          "legendFormat": "indexing exceptions",
+          "refId": "E"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum(increase(mongot_index_stats_indexing_initialSyncExceptions_total[$__rate_interval]))",
+          "legendFormat": "initial sync exceptions",
+          "refId": "F"
+        }
+      ],
+      "title": "Errors",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Everything on one 0-100% axis. Index builds and embedding backfills are the expensive phases: watch host CPU and memory here, since mongot competes with mongod for both. Load per core above 1 means the host is oversubscribed.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "id": 20,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_system_cpu_usage)",
+          "legendFormat": "host CPU",
+          "refId": "A"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_process_cpu_usage)",
+          "legendFormat": "mongot CPU",
+          "refId": "B"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_system_memory_phys_inUse_bytes) / max(mongot_system_memory_phys_total_bytes)",
+          "legendFormat": "host memory",
+          "refId": "C"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum(mongot_jvm_memory_used_bytes{area=\"heap\"}) / sum(mongot_jvm_memory_max_bytes{area=\"heap\"})",
+          "legendFormat": "mongot heap",
+          "refId": "D"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_system_load_average_1m) / max(mongot_system_cpu_count)",
+          "legendFormat": "load per core",
+          "refId": "E"
+        }
+      ],
+      "title": "Utilization",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 49
+      },
+      "id": 21,
+      "panels": [],
+      "title": "Host resources",
+      "type": "row"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Absolute memory, so you can see real headroom. mongot's heap is capped independently of host memory, and any swap in use is a problem for a latency-sensitive search process.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
+          "min": 0,
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 50
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_system_memory_phys_total_bytes)",
+          "legendFormat": "host total",
+          "refId": "A"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_system_memory_phys_inUse_bytes)",
+          "legendFormat": "host in use",
+          "refId": "B"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum(mongot_jvm_memory_used_bytes{area=\"heap\"})",
+          "legendFormat": "mongot heap used",
+          "refId": "C"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "sum(mongot_jvm_memory_max_bytes{area=\"heap\"})",
+          "legendFormat": "mongot heap limit",
+          "refId": "D"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_system_memory_virt_swap_inUse_bytes)",
+          "legendFormat": "swap in use",
+          "refId": "E"
+        }
+      ],
+      "title": "Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Metrics",
+      "description": "Where Lucene indexes live. Vector indexes are large and initial sync writes the whole collection, so this is the resource that runs out first.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
+          "min": 0,
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 50
+      },
+      "id": 23,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_system_disk_space_data_path_total_bytes)",
+          "legendFormat": "total",
+          "refId": "A"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_system_disk_space_data_path_free_bytes)",
+          "legendFormat": "free",
+          "refId": "B"
+        },
+        {
+          "datasource": "Metrics",
+          "expr": "max(mongot_system_disk_space_data_path_total_bytes) - max(mongot_system_disk_space_data_path_free_bytes)",
+          "legendFormat": "used",
+          "refId": "C"
+        }
+      ],
+      "title": "Disk space (index data path)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": [
+    "Percona Search",
+    "mongot",
+    "demo"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Percona Search for MongoDB \u2014 Mongot",
+  "uid": "percona-search-mongot",
+  "version": 1,
+  "weekStart": ""
+}

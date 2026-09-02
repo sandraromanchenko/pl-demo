@@ -1,7 +1,9 @@
-"""Search modes: full-text ($search), vector ($vectorSearch auto-embed) and
-hybrid (RRF of the two). Results share one shape so the UI renders one card."""
+"""Search modes: MongoDB $text, mongot $search, $vectorSearch auto-embed, and
+hybrid (RRF of $search + $vectorSearch). Results share one shape so the UI
+renders one card."""
 from typing import Any
 
+from .complexity import band_for
 from .config import get_settings
 from .db import get_collection
 
@@ -34,6 +36,8 @@ def _clean(doc: dict[str, Any]) -> dict[str, Any]:
     out = {k: doc.get(k) for k in PROJECT_FIELDS}
     out["_id"] = doc.get("_id")
     out["score"] = doc.get("score")
+    # Tagged here so every card words the weight the same way.
+    out["complexityBand"] = band_for(doc.get("complexity"))
     return out
 
 
@@ -41,10 +45,43 @@ def _run(pipeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [_clean(doc) for doc in get_collection().aggregate(pipeline)]
 
 
+def browse(limit: int) -> tuple[list[dict[str, Any]], int]:
+    """Whole collection, best-ranked first: the UI's landing state before any
+    query. Returns the page plus the collection total so the UI can say how big
+    the corpus is."""
+    total = get_collection().count_documents({})
+    docs = _run([
+        {"$sort": {"rank": 1}},
+        {"$limit": limit},
+        {"$project": PROJECTION},
+    ])
+    return docs, total
+
+
+def text_search(q: str, limit: int) -> list[dict[str, Any]]:
+    """Classic MongoDB text index: $text + textScore (no mongot)."""
+    return _run([
+        {"$match": {"$text": {"$search": q}}},
+        {"$addFields": {"score": {"$meta": "textScore"}}},
+        {"$sort": {"score": -1}},
+        {"$limit": limit},
+        {"$project": PROJECTION},
+    ])
+
+
 def fulltext_search(q: str, limit: int) -> list[dict[str, Any]]:
     settings = get_settings()
+    # Lucene $search with fuzzy: this is the visible difference vs classic $text,
+    # which only matches stemmed tokens and ignores typos.
+    text_operator = {
+        "text": {
+            "query": q,
+            "path": settings.text_fields,
+            "fuzzy": {"maxEdits": 2, "prefixLength": 1},
+        }
+    }
     return _run([
-        {"$search": {"index": settings.text_index, "text": {"query": q, "path": settings.text_fields}}},
+        {"$search": {"index": settings.text_index, **text_operator}},
         {"$limit": limit},
         {"$addFields": {"score": {"$meta": "searchScore"}}},
         {"$project": PROJECTION},
@@ -57,16 +94,15 @@ def vector_search(q: str, model: str, limit: int) -> list[dict[str, Any]]:
     if not index_name:
         raise ValueError(f"unknown model '{model}'")
     # Auto-embed: pass `query` text (not queryVector); numCandidates oversamples for recall.
+    stage: dict[str, Any] = {
+        "index": index_name,
+        "path": "search_text",
+        "query": q,
+        "numCandidates": max(limit * 10, 100),
+        "limit": limit,
+    }
     return _run([
-        {
-            "$vectorSearch": {
-                "index": index_name,
-                "path": "search_text",
-                "query": q,
-                "numCandidates": max(limit * 10, 100),
-                "limit": limit,
-            }
-        },
+        {"$vectorSearch": stage},
         {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
         {"$project": PROJECTION},
     ])
@@ -100,6 +136,8 @@ def hybrid_search(q: str, model: str, limit: int) -> list[dict[str, Any]]:
 
 
 def search(q: str, search_type: str, model: str, limit: int) -> list[dict[str, Any]]:
+    if search_type == "text":
+        return text_search(q, limit)
     if search_type == "fulltext":
         return fulltext_search(q, limit)
     if search_type == "vector":

@@ -5,6 +5,11 @@
 # so set it here (or pass TF_VAR_key_name / -var 'key_name=...') before apply.
 key_name = "my-ec2-keypair"
 
+# Private key for key_name. Set it unless the key is in your ssh-agent: the
+# aws_env output then bakes `-i <path>` into demo/aws.env, which is what lets
+# demo/run.sh (and every make target) SSH to the hosts.
+# ssh_key_path = "/home/me/.ssh/my-ec2-keypair.pem"
+
 # Where user_data clones the demo from (must be reachable from EC2).
 repo_url    = "https://github.com/sandraromancnheko/pl-demo.git"
 repo_branch = "main"
@@ -15,12 +20,14 @@ repo_branch = "main"
 # ami        = "ami-01c276c8e835125d1"   # Ubuntu 24.04 (noble)
 # billing_tag = "dev"
 
-# mongot build WITH the OPENAI_COMPATIBLE provider (defaults to :dev).
-# mongot_image = "perconalab/percona-search-mongodb:dev"
+# mongot with auto-embedding (OPENAI_COMPATIBLE). Defaults to 1.70.4.
+# mongot_image = "percona/percona-search-mongodb:1.70.4"
 
 # Per-role sizing (models host larger for CPU embedding throughput).
 # instance_type_data   = "t3.medium"
 # instance_type_models = "t3.xlarge"
 # instance_type_app    = "t3.medium"
 
-# pmm_password = "admin"
+# Start database, search, embedding backends and seed on boot (no SSH).
+# Leave false for the live demo: images pulled, search not running.
+# auto_start = true
