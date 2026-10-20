@@ -14,7 +14,7 @@ whose defaults equal the compose service names
 | Profile | Services | Role |
 |---------|----------|------|
 | `data` | `mongod`, `mongot`, `pmm-client` | database + search + monitoring agent |
-| `models` | `tei`, `ollama` | OpenAI-compatible embedding backends |
+| `models` | `ollama` | OpenAI-compatible embedding backend |
 | `app` | `backend`, `frontend`, `pmm-server` | API, UI, monitoring UI |
 | `seed` | `seed` | one-shot loader: documents + indexes, run on demand |
 
@@ -32,7 +32,7 @@ whose defaults equal the compose service names
 
 | `model` | Backend | Dims | Vector index |
 |---------|---------|------|--------------|
-| `bge-small` (default) | `tei` (`BAAI/bge-small-en-v1.5`) | 384 | `vec_bge_small` |
+| `bge-small` (default) | `ollama` (`BAAI/bge-small-en-v1.5`) | 384 | `vec_bge_small` |
 | `nomic-embed-text` | `ollama` | 768 | `vec_nomic` |
 | `bge-m3` | `ollama` | 1024 | `vec_bge_m3` |
 
@@ -210,7 +210,7 @@ One new `pl-demo` group attached to all three hosts:
 |------|--------|---------|
 | SSH `22` | `0.0.0.0/0` | admin access |
 | ICMP | `0.0.0.0/0` | ping |
-| **all traffic within the SG** (self) | this SG | cross-host `27017` / `8085` / `11434` / `8443` |
+| **all traffic within the SG** (self) | this SG | cross-host `27017` / `11434` / `8443` |
 | `80` / `8000` / `8443` | `web_ingress_cidr` | frontend / backend / PMM UI (served by the app host) |
 | egress all | — | image pulls, model downloads |
 
@@ -268,7 +268,7 @@ pl-demo/
     mongod.conf               # mongotHost: mongot:27028 (co-located)
     mongod-nosearch.conf      # same, minus the mongot settings
     mongot.yml                # syncSource mongod:27017 as user mongot
-    embedding-service-configs.yml.tmpl  # ${TEI_URL} / ${OLLAMA_URL}
+    embedding-service-configs.yml.tmpl  # ${OLLAMA_URL}
     keyfile
     mongot-password           # SCRAM password for the mongot user
     dba-password              # SCRAM password for the dba operator user
@@ -286,8 +286,8 @@ pl-demo/
   always **co-located on the data host**, keeping gRPC and mongot's SCRAM user
   on one machine. mongod still uses a replica-set keyfile; mongot does not.
 - The embedding catalog is a template
-  (`config/embedding-service-configs.yml.tmpl`) with `${TEI_URL}` (default
-  `http://tei:80`) and `${OLLAMA_URL}` (default `http://ollama:11434`), rendered
+  (`config/embedding-service-configs.yml.tmpl`) with `${OLLAMA_URL}` (default
+  `http://ollama:11434`), rendered
   at mongot container start so it can point at the models host on AWS.
 - Backend/seed `MONGO_URI` defaults to
   `mongodb://root:root@mongod:27017/?authSource=admin&directConnection=true`;
@@ -300,4 +300,4 @@ pl-demo/
 |---------|-------|
 | Vector/hybrid returns an error; seed logs "could not create vector index" | `MONGOT_IMAGE` is older than `1.70.4` (no `OPENAI_COMPATIBLE` provider). |
 | `/health` 503 | Backend can't reach Mongo — check `MONGO_URI` and that the data host's `27017` is reachable. |
-| Indexes stuck not `READY` | Embedding backend still downloading its model, or mongot can't reach `TEI_URL`/`OLLAMA_URL`; check `docker compose logs mongot`. |
+| Indexes stuck not `READY` | Embedding backend still downloading its model, or mongot can't reach `OLLAMA_URL`; check `docker compose logs mongot`. |

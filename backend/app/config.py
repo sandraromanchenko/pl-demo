@@ -3,7 +3,7 @@ runs locally (compose service names) and on AWS (private IPs)."""
 import os
 from functools import lru_cache
 
-# Model -> vector index. bge-small=TEI, others=Ollama.
+# Model -> vector index. Every model is served by Ollama.
 MODEL_INDEXES = {
     "bge-small": "vec_bge_small",
     "nomic-embed-text": "vec_nomic",

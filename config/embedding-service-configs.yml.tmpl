@@ -1,5 +1,5 @@
-# Embedding model catalog (referenced from mongot.yml). TEMPLATE: ${TEI_URL} and
-# ${OLLAMA_URL} are substituted at container start.
+# Embedding model catalog (referenced from mongot.yml). TEMPLATE: ${OLLAMA_URL}
+# is substituted at container start. Every model is served by Ollama.
 #
 # modelName -> the index definition's `model` field. outputDimensions MUST match
 # the model's native dimension. Schema is strict: queryPrefix/documentPrefix go
@@ -9,7 +9,7 @@ configs:
   - modelName: bge-small
     embeddingProvider: OPENAI_COMPATIBLE
     config:
-      providerEndpoint: ${TEI_URL}/v1/embeddings
+      providerEndpoint: ${OLLAMA_URL}/v1/embeddings
       modelConfig:
         batchSize: 96
         batchTokenLimit: 120000

@@ -126,7 +126,6 @@ locals {
 
   data_env = <<-EOT
     MONGOT_IMAGE=${var.mongot_image}
-    TEI_URL=http://${aws_network_interface.models.private_ip}:8085
     OLLAMA_URL=http://${aws_network_interface.models.private_ip}:11434
     PMM_SERVER=${aws_network_interface.app.private_ip}
     PMM_SERVER_PORT=${local.pmm_port}
@@ -138,7 +137,6 @@ locals {
   EOT
 
   models_env = <<-EOT
-    TEI_MODEL_ID=BAAI/bge-small-en-v1.5
     EMBED_MODELS=${var.embed_models}
   EOT
 

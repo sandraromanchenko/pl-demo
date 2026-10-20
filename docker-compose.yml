@@ -2,7 +2,7 @@ name: pl-demo
 
 # Local: run all profiles on one host (cross-host env vars default to service
 # names). AWS: each host runs ONE profile with .env pointing at the others' IPs.
-# Profiles: data (mongod, mongot, pmm-client) / models (tei, ollama) /
+# Profiles: data (mongod, mongot, pmm-client) / models (ollama) /
 # app (backend, frontend, pmm-server) / seed (one-shot loader)
 
 x-dns: &dns
@@ -12,7 +12,7 @@ x-dns: &dns
 services:
   mongod:
     <<: *dns
-    image: ${MONGOD_IMAGE:-percona/percona-server-mongodb:8.3.8}
+    image: ${MONGOD_IMAGE:-percona/percona-server-mongodb:8.3}
     profiles: ["data"]
     user: "0"
     hostname: mongod
@@ -105,12 +105,11 @@ services:
 
   mongot:
     <<: *dns
-    image: ${MONGOT_IMAGE:-percona/percona-search-mongodb:1.70.4}
+    image: ${MONGOT_IMAGE:-percona/percona-search-mongodb:latest}
     profiles: ["data"]
     user: "1001:0"
     hostname: mongot
     environment:
-      TEI_URL: ${TEI_URL:-http://tei:80}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
     entrypoint:
       - bash
@@ -118,8 +117,7 @@ services:
       - |
         install -d -m 0750 /etc/mongot/secrets
         install -m 0400 /mnt/mongot-password /etc/mongot/secrets/passwordFile
-        sed -e 's|$${TEI_URL}|'"$$TEI_URL"'|g' \
-            -e 's|$${OLLAMA_URL}|'"$$OLLAMA_URL"'|g' \
+        sed -e 's|$${OLLAMA_URL}|'"$$OLLAMA_URL"'|g' \
             /etc/mongot/embedding-service-configs.yml.tmpl \
             > /etc/mongot/embedding-service-configs.yml
         exec /entrypoint.sh mongot --config /etc/mongot/mongot.yml
@@ -238,23 +236,6 @@ services:
     networks:
       - pl-demo
 
-  tei:
-    <<: *dns
-    image: ${TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9}
-    profiles: ["models"]
-    hostname: tei
-    command:
-      - "--model-id"
-      - "${TEI_MODEL_ID:-BAAI/bge-small-en-v1.5}"
-      - "--max-client-batch-size"
-      - "96"
-    ports:
-      - "8085:80"
-    volumes:
-      - tei_data:/data
-    networks:
-      - pl-demo
-
   ollama:
     <<: *dns
     image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
@@ -269,9 +250,16 @@ services:
         /bin/ollama serve &
         pid=$$!
         until /bin/ollama list >/dev/null 2>&1; do sleep 1; done
-        # Pull Ollama models from EMBED_MODELS (skip TEI's bge-small).
+        # bge-small is BAAI/bge-small-en-v1.5, registered under the catalog name.
+        # The Ollama image is multi-arch, so this is the same on Intel and Apple Silicon.
         for m in $$(echo "$$EMBED_MODELS" | tr ',' ' '); do
-          if [ "$$m" != "bge-small" ]; then /bin/ollama pull "$$m"; fi
+          if [ "$$m" = "bge-small" ]; then
+            /bin/ollama pull hf.co/BAAI/bge-small-en-v1.5
+            printf 'FROM hf.co/BAAI/bge-small-en-v1.5\n' > /tmp/bge-small.Modelfile
+            /bin/ollama create bge-small -f /tmp/bge-small.Modelfile
+          else
+            /bin/ollama pull "$$m"
+          fi
         done
         wait $$pid
     ports:
@@ -379,7 +367,6 @@ services:
 volumes:
   mongod_data:
   mongot_data:
-  tei_data:
   ollama_data:
   pmm_data:
 

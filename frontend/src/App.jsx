@@ -40,27 +40,27 @@ export default function App() {
       .catch((e) => setError(`Could not load models: ${e.message}`));
   }, []);
 
-  // Landing state: the whole collection, so the audience sees the corpus and
-  // its size on screen before any query narrows it.
-  useEffect(() => {
-    fetchGames()
-      .then((data) => {
-        setResults(data.results || []);
-        setMeta({ browse: true, total: data.total });
-      })
-      .catch((e) => setError(`Could not load games: ${e.message}`));
-  }, []);
-
   const needsModel = type === "vector" || type === "hybrid";
 
-  async function runSearch(e, query) {
+  async function loadBrowse() {
+    try {
+      const data = await fetchGames();
+      setResults(data.results || []);
+      setMeta({ browse: true, total: data.total });
+      setError(null);
+    } catch (e) {
+      setError(`Could not load games: ${e.message}`);
+    }
+  }
+
+  async function runSearch(e, query, searchType = type) {
     e?.preventDefault();
     const qText = (query ?? q).trim();
     if (!qText) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await search({ q: qText, type, model, limit: 5 });
+      const data = await search({ q: qText, type: searchType, model, limit: 5 });
       setResults(data.results || []);
       setMeta({
         count: data.count,
@@ -76,23 +76,53 @@ export default function App() {
     }
   }
 
-  // Re-run when the engine changes so Text vs Full-text is comparable in one click.
-  // The empty-query guard also keeps the initial load quiet: resolving the model
-  // list sets `model`, which would otherwise fire a search before anyone typed.
+  // Text with no query → show the corpus. Full-text / Vector with no query →
+  // probe the engine so a pre-mongot stack still surfaces the 503 on screen
+  // (otherwise the browse list looks like those modes already work). With a
+  // query, re-run on every engine change so Text vs Full-text is one click.
   useEffect(() => {
-    if (!q.trim()) return;
-    runSearch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only type/model
+    let cancelled = false;
+
+    async function syncEngine() {
+      if (q.trim()) {
+        await runSearch(undefined, q, type);
+        return;
+      }
+      if (type === "text") {
+        await loadBrowse();
+        return;
+      }
+      // Probe: discard hits; we only care whether the engine is available.
+      setLoading(true);
+      setError(null);
+      try {
+        await search({ q: "ping", type, model, limit: 1 });
+        if (cancelled) return;
+        setResults([]);
+        setMeta(null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err.message);
+        setResults([]);
+        setMeta(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    syncEngine();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- type/model/q drive sync
   }, [type, model]);
 
-  // The Search button and the example chips both restart from classic $text, so
-  // every demo step walks up from there. Search directly only when the type is
-  // already Text; otherwise the type effect re-runs it and we'd fire twice.
-  // This can't live in runSearch itself, which the type effect also calls.
+  // Example chips always restart from classic $text (demo walk-up). Search
+  // button keeps the selected engine so Full-text / Vector can fail visibly.
   function searchFromText(query) {
     if (query !== undefined) setQ(query);
     if (type === "text") {
-      runSearch(undefined, query);
+      runSearch(undefined, query, "text");
     } else {
       setType("text");
     }
@@ -100,7 +130,7 @@ export default function App() {
 
   function handleSubmit(e) {
     e.preventDefault();
-    searchFromText();
+    runSearch(e);
   }
 
   return (
@@ -115,9 +145,9 @@ export default function App() {
         />
         <div className="relative mx-auto flex max-w-4xl items-center gap-5 px-4 py-6">
           <img
-            src="/percona-live-logo.png"
-            alt="Percona Live"
-            className="h-14 w-auto flex-shrink-0"
+            src="/percona-logo-white.svg"
+            alt="Percona"
+            className="h-10 w-auto flex-shrink-0"
           />
           <div className="border-l border-brand-line pl-5">
             <h1 className="text-2xl font-extrabold tracking-tight text-white">
@@ -260,7 +290,7 @@ export default function App() {
         </div>
 
         <footer className="mt-12 border-t border-brand-line pt-4 text-xs text-brand-muted">
-          Percona Search for MongoDB · Percona Live 2026 Amsterdam
+          Percona Search for MongoDB
         </footer>
       </main>
     </div>

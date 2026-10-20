@@ -12,7 +12,7 @@ const game = {
     "features behind a paywall. You stand with the rebels who refuse " +
     "corporate lock-in.\n\n" +
 
-    "Your stronghold is Percona Live Amsterdam - a bastion for keeping " +
+    "Your stronghold is Percona — a bastion for keeping " +
     "open source genuinely open, where engineers believe technology " +
     "should be shared, not hoarded. Between sessions and hallway coffee " +
     "you collect Insight and Code tokens to arm your team.\n\n" +

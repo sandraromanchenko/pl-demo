@@ -128,5 +128,5 @@ demo-reset:
 	$(RUN) data 'docker volume rm -f pl-demo_mongod_data pl-demo_mongot_data'
 	$(RUN) app 'docker compose --profile app rm -sfv pmm-server'
 	$(RUN) app 'docker volume rm -f pl-demo_pmm_data'
-	$(RUN) models 'docker compose --profile models stop tei ollama'
+	$(RUN) models 'docker compose --profile models stop ollama'
 	@echo "Reset done. Run 'make prestart' to rebuild the pre-demo state."

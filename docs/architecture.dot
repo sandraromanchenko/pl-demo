@@ -74,12 +74,10 @@ digraph pl_demo {
     t_models [shape=plaintext, style="", fillcolor="none",
               label=<<B><FONT POINT-SIZE="20" COLOR="#1F7150">Models host</FONT></B>>];
 
-    tei [label=<<B>tei</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">bge-small &#183; 384d &#183; :8085</FONT>>, color="#2E9E6B"];
-    ollama [label=<<B>ollama</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">nomic-embed-text 768d<BR/>bge-m3 1024d &#183; :11434</FONT>>, color="#2E9E6B"];
+    ollama [label=<<B>ollama</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">bge-small 384d<BR/>nomic-embed-text 768d<BR/>bge-m3 1024d &#183; :11434</FONT>>, color="#2E9E6B"];
 
-    { rank=same; t_models; tei; ollama; }
-    t_models -> tei [style=invis];
-    tei -> ollama [style=invis];
+    { rank=same; t_models; ollama; }
+    t_models -> ollama [style=invis];
   }
 
   // request path
@@ -92,7 +90,6 @@ digraph pl_demo {
                     dir=both, weight=20, penwidth=1.9, color="#2F80C1", fontcolor="#1F5F94"];
 
   // embeddings
-  mongot -> tei [label="  TEI_URL  ", weight=4, penwidth=1.9, color="#2E9E6B", fontcolor="#1F7150"];
   mongot -> ollama [label="  OLLAMA_URL  ", weight=4, penwidth=1.9, color="#2E9E6B", fontcolor="#1F7150"];
 
   // monitoring

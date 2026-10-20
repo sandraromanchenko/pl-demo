@@ -54,7 +54,7 @@ MONGO_DB = os.environ.get("MONGO_DB", "boardgames")
 MONGO_COLLECTION = os.environ.get("MONGO_COLLECTION", "games")
 TEXT_INDEX = os.environ.get("TEXT_INDEX", "text_index")
 
-# Model -> vector index. bge-small=TEI, others=Ollama.
+# Model -> vector index. Every model is served by Ollama.
 MODEL_INDEXES = {
     "bge-small": "vec_bge_small",
     "nomic-embed-text": "vec_nomic",

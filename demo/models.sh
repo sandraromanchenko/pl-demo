@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Embedding backends on the models host
+# Embedding backend on the models host. Every enabled model, including
+# bge-small, is served by Ollama.
 
 set -euo pipefail
 
@@ -12,59 +13,37 @@ if [ -z "$models" ] && [ -f .env ]; then
 fi
 models=${models:-bge-small}
 
-need_tei=0
-need_ollama=0
-for m in $(echo "$models" | tr ',' ' '); do
-  case "$m" in
-    bge-small) need_tei=1 ;;
-    *) need_ollama=1 ;;
-  esac
-done
-
-services=()
-if [ "$need_tei" = 1 ]; then services+=(tei); fi
-if [ "$need_ollama" = 1 ]; then services+=(ollama); fi
-if [ ${#services[@]} -eq 0 ]; then
+if [ -z "$(echo "$models" | tr -d ' ,')" ]; then
   echo "demo/models.sh: EMBED_MODELS='$models' needs no embedding backend"
   exit 0
 fi
 
-echo "EMBED_MODELS=$models -> ${services[*]}"
+echo "EMBED_MODELS=$models -> ollama"
 
 if [ "$mode" = warm ]; then
   docker compose --profile models pull
 fi
 
-docker compose --profile models up -d "${services[@]}"
+docker compose --profile models up -d ollama
 
-wait_for() {
-  local what=$1 timeout=${2:-900} deadline
-  deadline=$((SECONDS + timeout))
-  while [ "$SECONDS" -lt "$deadline" ]; do
-    case "$what" in
-      tei) curl -fsS "http://localhost:8085/health" >/dev/null 2>&1 && return 0 ;;
-      ollama)
-        local listed=1
-        for m in $(echo "$models" | tr ',' ' '); do
-          if [ "$m" = bge-small ]; then continue; fi
-          docker compose exec -T ollama ollama list 2>/dev/null | grep -q "^$m" || listed=0
-        done
-        if [ "$listed" = 1 ]; then return 0; fi
-        ;;
-    esac
-    sleep 3
+deadline=$((SECONDS + 900))
+echo "waiting for ollama ..."
+while [ "$SECONDS" -lt "$deadline" ]; do
+  listed=1
+  for m in $(echo "$models" | tr ',' ' '); do
+    docker compose exec -T ollama ollama list 2>/dev/null | grep -q "^$m" || listed=0
   done
-  echo "WARN $what not ready after ${timeout}s" >&2
-  return 1
-}
-
-for s in "${services[@]}"; do
-  echo "waiting for $s ..."
-  wait_for "$s" || true
-  echo "$s ready"
+  if [ "$listed" = 1 ]; then
+    echo "ollama ready"
+    break
+  fi
+  sleep 3
 done
+if [ "$listed" != 1 ]; then
+  echo "WARN ollama not ready after 900s" >&2
+fi
 
 if [ "$mode" = warm ]; then
-  docker compose --profile models stop "${services[@]}"
+  docker compose --profile models stop ollama
   echo "models warmed and stopped; weights cached in the compose volumes"
 fi

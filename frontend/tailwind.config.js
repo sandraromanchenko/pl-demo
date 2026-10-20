@@ -3,7 +3,7 @@ export default {
   content: ["./index.html", "./src/**/*.{js,jsx}"],
   theme: {
     extend: {
-      // Percona Live 2026 deck palette, sampled from the slides.
+      // Percona brand palette for the demo UI.
       colors: {
         brand: {
           bg: "#282727",
