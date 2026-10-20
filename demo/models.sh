@@ -28,7 +28,13 @@ docker compose --profile models up -d ollama
 
 deadline=$((SECONDS + 900))
 echo "waiting for ollama ..."
+listed=0
 while [ "$SECONDS" -lt "$deadline" ]; do
+  if ! docker compose ps --status running --format '{{.Service}}' | grep -qx ollama; then
+    echo "ollama container exited while pulling the model:" >&2
+    docker compose logs --tail 40 ollama >&2 || true
+    exit 1
+  fi
   listed=1
   for m in $(echo "$models" | tr ',' ' '); do
     docker compose exec -T ollama ollama list 2>/dev/null | grep -q "^$m" || listed=0
@@ -37,10 +43,12 @@ while [ "$SECONDS" -lt "$deadline" ]; do
     echo "ollama ready"
     break
   fi
-  sleep 3
+  echo "  still pulling ($models) ..."
+  sleep 5
 done
 if [ "$listed" != 1 ]; then
   echo "WARN ollama not ready after 900s" >&2
+  docker compose logs --tail 40 ollama >&2 || true
 fi
 
 if [ "$mode" = warm ]; then

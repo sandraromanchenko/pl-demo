@@ -254,10 +254,11 @@ services:
         # The Ollama image is multi-arch, so this is the same on Intel and Apple Silicon.
         for m in $$(echo "$$EMBED_MODELS" | tr ',' ' '); do
           if [ "$$m" = "bge-small" ]; then
-            /bin/ollama pull hf.co/BAAI/bge-small-en-v1.5
-            printf 'FROM hf.co/BAAI/bge-small-en-v1.5\n' > /tmp/bge-small.Modelfile
-            /bin/ollama create bge-small -f /tmp/bge-small.Modelfile
+            echo "pulling qllama/bge-small-en-v1.5:f16"
+            /bin/ollama pull qllama/bge-small-en-v1.5:f16
+            /bin/ollama cp qllama/bge-small-en-v1.5:f16 bge-small
           else
+            echo "pulling $$m"
             /bin/ollama pull "$$m"
           fi
         done
