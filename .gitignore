@@ -2,10 +2,19 @@
 data/*.csv
 data/*.ndjson
 !data/sample_boardgames.ndjson
+!data/easy_boardgames.ndjson
 data/*.json
 
 # Demo runbook
 demo/README.md
+
+# Talk material and instructions stay local: all Markdown files and the talk script
+*.md
+demo/talk.sh
+docs/talk-speech.txt
+
+# Architecture pictures and the scripts that draw them (png, svg, draw.io, graphviz, python)
+docs/*architecture*
 
 # Local env files (only *.example / env/*.env templates are committed)
 .env
@@ -34,6 +43,10 @@ deploy/aws/*.tfvars
 !deploy/aws/*.tfvars.example
 deploy/aws/.terraform.lock.hcl
 crash.log
+
+# Host NVIDIA driver libs and the CUDA 13 sonames the vLLM image is missing
+osmc/.nvidia-libs/
+osmc/.cuda13-libs/
 
 # Editor / OS
 .DS_Store

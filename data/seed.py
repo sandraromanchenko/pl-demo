@@ -3,11 +3,12 @@
 
   data     documents + plain mongod indexes (rank, classic $text). Needs only
            mongod, so it runs as soon as the database starts.
+  fulltext only the mongot full-text index (no embedding models)
   indexes  mongot full-text + per-model autoEmbed vector indexes, waiting for
            READY. Needs mongot and a reachable embedding backend.
   all      both (default).
 
-Reads DATA_FILE (default: sample_boardgames.ndjson) and builds a search_text field
+Reads DATA_FILE (default: easy_boardgames.ndjson) and builds a search_text field
 (name + description) for autoEmbed. Safe to re-run; vector index creation is
 best-effort (needs a mongot with the OPENAI_COMPATIBLE provider)."""
 import json
@@ -68,11 +69,11 @@ EMBED_MODELS = [
 ]
 VECTOR_INDEXES = {m: MODEL_INDEXES[m] for m in EMBED_MODELS}
 
-DATA_FILE = os.environ.get("DATA_FILE", "/work/data/sample_boardgames.ndjson")
+DATA_FILE = os.environ.get("DATA_FILE", "/work/data/easy_boardgames.ndjson")
 SEED_DATA = os.environ.get("SEED_DATA", "true").lower() == "true"
 WAIT_INDEX_READY = os.environ.get("WAIT_INDEX_READY", "true").lower() == "true"
 # data = documents only (mongod), indexes = search indexes only (mongot), all = both.
-SEED_PHASES = ("all", "data", "indexes")
+SEED_PHASES = ("all", "data", "indexes", "fulltext")
 SEED_PHASE = os.environ.get("SEED_PHASE", "all").lower()
 
 # Full-text index fields (explicit, not dynamic, for focused scoring).
@@ -155,13 +156,21 @@ def connect(retries=60, delay=2):
 
 
 def insert_if_empty(coll, docs):
-    existing = coll.estimated_document_count()
-    if existing > 0:
+    existing = coll.count_documents({})
+    same = existing == len(docs) and all(
+        coll.count_documents({"_id": d["_id"], "description": d.get("description")}, limit=1)
+        for d in docs
+    )
+    if existing > 0 and same:
         log(f"{coll.full_name} already has data ({existing} docs); skipping insert")
         return
     if not docs:
         log("no documents to insert")
         return
+    if existing > 0:
+        # The data file changed (games added or removed). Reload it, so the cards stay complete.
+        log(f"{coll.full_name} differs from the data file ({existing} vs {len(docs)} docs); reloading")
+        coll.delete_many({})
     # Batch inserts to bound memory.
     batch = 1000
     for i in range(0, len(docs), batch):
@@ -285,9 +294,7 @@ def expected_indexes():
 
 def seed_documents(coll):
     """Phase `data`: what a plain MongoDB deployment would already hold."""
-    # Parse the dataset only when inserting.
-    docs = load_docs() if coll.estimated_document_count() == 0 else []
-    insert_if_empty(coll, docs)
+    insert_if_empty(coll, load_docs())
     # btree index on rank for fast sort-by-rank.
     coll.create_index([("rank", ASCENDING)], name="rank_idx")
     ensure_classic_text_index(coll)
@@ -312,6 +319,9 @@ def seed_once():
         seed_documents(coll)
     if SEED_PHASE in ("all", "indexes"):
         seed_search_indexes(coll)
+    if SEED_PHASE == "fulltext":
+        # Only the Lucene full-text index: no embedding models needed.
+        ensure_text_index(coll, existing_search_indexes(coll))
     log(f"done (phase: {SEED_PHASE})")
 
 

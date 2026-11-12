@@ -1,0 +1,35 @@
+# Laptop GPU. Docker on this machine has no NVIDIA runtime, so the container
+# gets the device nodes and the host driver libraries directly.
+# Selected automatically when `nvidia-smi -L` succeeds (osmc/compose-files.sh).
+# Only used when the osmc-rag profile is started (make osmc-rag-up).
+services:
+  vllm:
+    image: ${VLLM_GPU_IMAGE:-vllm/vllm-openai:v0.32.0-x86_64-cu129}
+    entrypoint: ["bash", "/opt/vllm-gpu-entrypoint.sh"]
+    command:
+      - vllm
+      - serve
+      - --model
+      - ${VLLM_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
+      - --max-model-len
+      - "2048"
+      # 4 GB card; leave room for the desktop.
+      - --gpu-memory-utilization
+      - "0.70"
+      - --generation-config
+      - vllm
+    environment:
+      VLLM_CPU_KVCACHE_SPACE: "0"
+      # Host driver libs, then the CUDA 13 sonames torchcodec needs.
+      # The image itself ships CUDA 12.9.
+      LD_LIBRARY_PATH: /opt/nvidia:/opt/cuda13:/usr/local/nvidia/lib64:/usr/local/cuda/lib64
+    devices:
+      - /dev/nvidia0:/dev/nvidia0
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
+      - /dev/nvidia-modeset:/dev/nvidia-modeset
+    volumes:
+      - ./osmc/.nvidia-libs:/opt/nvidia:ro
+      - ./osmc/.cuda13-libs:/opt/cuda13:ro
+      - ./osmc/vllm-gpu-entrypoint.sh:/opt/vllm-gpu-entrypoint.sh:ro

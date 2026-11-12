@@ -72,7 +72,6 @@ export default function GameCard({ game }) {
               ★ {Number(game.averageRating).toFixed(1)}
             </span>
           ) : null}
-          {game.rank ? <span>#{game.rank}</span> : null}
           {game.minPlayers ? (
             <span>
               {game.minPlayers}

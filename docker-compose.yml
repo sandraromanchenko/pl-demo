@@ -145,7 +145,7 @@ services:
 
   pmm-client:
     <<: *dns
-    image: ${PMM_CLIENT_IMAGE:-percona/pmm-client:3}
+    image: ${PMM_CLIENT_IMAGE:-percona/pmm-client:3.10.0}
     profiles: ["data"]
     hostname: pmm-client
     depends_on:
@@ -154,6 +154,9 @@ services:
     environment:
       PMM_SERVER: ${PMM_SERVER:-pmm-server}
       PMM_SERVER_PORT: ${PMM_SERVER_PORT:-8443}
+      # gRPC looks up a TXT record for the server name. With no internet that question goes to a DNS
+      # server that never answers, and the agent never connects. Skip the lookup.
+      GRPC_ENABLE_TXT_SERVICE_CONFIG: "false"
       PMM_USERNAME: ${PMM_USERNAME:-admin}
       PMM_PASSWORD: ${PMM_PASSWORD:-admin1}
       MONGO_HOST: ${MONGO_HOST:-mongod}
@@ -252,8 +255,12 @@ services:
         until /bin/ollama list >/dev/null 2>&1; do sleep 1; done
         # bge-small is BAAI/bge-small-en-v1.5, registered under the catalog name.
         # The Ollama image is multi-arch, so this is the same on Intel and Apple Silicon.
+        # Pull only what is missing: a model that is already in the volume must start
+        # without the internet (a pull checks the registry even for a model we have).
         for m in $$(echo "$$EMBED_MODELS" | tr ',' ' '); do
-          if [ "$$m" = "bge-small" ]; then
+          if /bin/ollama list | grep -q "^$$m"; then
+            echo "$$m is already in the volume"
+          elif [ "$$m" = "bge-small" ]; then
             echo "pulling qllama/bge-small-en-v1.5:f16"
             /bin/ollama pull qllama/bge-small-en-v1.5:f16
             /bin/ollama cp qllama/bge-small-en-v1.5:f16 bge-small
@@ -290,6 +297,16 @@ services:
       MONGO_COLLECTION: ${MONGO_COLLECTION:-games}
       TEXT_INDEX: ${TEXT_INDEX:-text_index}
       EMBED_MODELS: ${EMBED_MODELS:-bge-small}
+      # Vector search over the catalog on either engine (see backend/app/vector.py).
+      OSMC_COLLECTION: ${OSMC_COLLECTION:-catalog}
+      OLLAMA_URL: http://ollama:11434
+      OPENSEARCH_URL: http://opensearch:9200
+      EMBED_MODEL: ${EMBED_MODEL:-bge-small}
+      GOLDEN_PATH: /golden/golden.json
+      QUERY_MODEL_FILE: /golden/query_model
+      EF_SEARCH: ${EF_SEARCH:-100}
+    volumes:
+      - osmc_golden:/golden:ro
     ports:
       - "8000:8000"
     networks:
@@ -323,7 +340,7 @@ services:
       MONGO_COLLECTION: ${MONGO_COLLECTION:-games}
       TEXT_INDEX: ${TEXT_INDEX:-text_index}
       EMBED_MODELS: ${EMBED_MODELS:-bge-small}
-      DATA_FILE: /work/data/sample_boardgames.ndjson
+      DATA_FILE: /work/data/easy_boardgames.ndjson
       SEED_DATA: ${SEED_DATA:-true}
       WAIT_INDEX_READY: ${WAIT_INDEX_READY:-true}
       SEED_PHASE: ${SEED_PHASE:-all}
@@ -342,10 +359,12 @@ services:
 
   pmm-server:
     <<: *dns
-    image: ${PMM_SERVER_IMAGE:-percona/pmm-server:3}
+    image: ${PMM_SERVER_IMAGE:-percona/pmm-server:3.10.0}
     profiles: ["app"]
     hostname: pmm-server
     environment:
+      # Pinned version plus no update check: no "Update to PMM x.y" popup on stage.
+      PMM_ENABLE_UPDATES: "false"
       # `make prestart` re-asserts admin1 so a UI password change cannot leave
       # pmm-client unable to register.
       PMM_PASSWORD: ${PMM_PASSWORD:-admin1}
@@ -358,6 +377,15 @@ services:
       # both exporters have to resolve from inside this container.
       - "mongot:${DATA_PRIVATE_IP:-host-gateway}"
       - "index-exporter:${DATA_PRIVATE_IP:-host-gateway}"
+      # OSMC scrapes are published on the host, same as mongot. vLLM's host
+      # port is 8002 because the board-games API already owns 8000.
+      - "osmc-recall:${DATA_PRIVATE_IP:-host-gateway}"
+      - "osmc-index-exporter:${DATA_PRIVATE_IP:-host-gateway}"
+      - "osmc-opensearch-exporter:${DATA_PRIVATE_IP:-host-gateway}"
+      - "osmc-embedding-probe:${DATA_PRIVATE_IP:-host-gateway}"
+      - "osmc-health-exporter:${DATA_PRIVATE_IP:-host-gateway}"
+      - "osmc-app:${DATA_PRIVATE_IP:-host-gateway}"
+      - "vllm:${DATA_PRIVATE_IP:-host-gateway}"
     volumes:
       - pmm_data:/srv
       - ./pmm/provider.yml:/usr/share/grafana/conf/provisioning/dashboards/percona-search.yml:ro
@@ -365,11 +393,336 @@ services:
     networks:
       - pl-demo
 
+  # OSMC talk stack. Profile "osmc" is recall + catalog index metrics (no LLM).
+  # "osmc-rag" is the optional assistant + vLLM. "osmc-seed" is one-shot.
+  osmc-rag:
+    <<: *dns
+    build:
+      context: ./osmc
+    image: ${OSMC_IMAGE:-pl-demo-osmc:latest}
+    pull_policy: build
+    profiles: ["osmc-rag"]
+    restart: unless-stopped
+    hostname: osmc-rag
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://root:root@mongod:27017/?authSource=admin&directConnection=true}
+      MONGO_DB: ${MONGO_DB:-boardgames}
+      MONGO_COLLECTION: ${OSMC_COLLECTION:-catalog}
+      VECTOR_INDEX: ${OSMC_VECTOR_INDEX:-vec_osmc}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      VLLM_URL: http://vllm:8000
+      EMBED_MODEL: ${EMBED_MODEL:-bge-small}
+      VLLM_MODEL: ${VLLM_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
+      GOLDEN_PATH: /golden/golden.json
+      RAG_ADDR: ":8090"
+    ports:
+      - "8090:8090"
+    volumes:
+      - osmc_golden:/golden:ro
+    networks:
+      - pl-demo
+
+  osmc-recall:
+    <<: *dns
+    build:
+      context: ./osmc
+    image: ${OSMC_IMAGE:-pl-demo-osmc:latest}
+    pull_policy: build
+    profiles: ["osmc"]
+    hostname: osmc-recall
+    entrypoint: ["/usr/local/bin/recall"]
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://root:root@mongod:27017/?authSource=admin&directConnection=true}
+      GOLDEN_PATH: /golden/golden.json
+      RECALL_ADDR: ":9948"
+      RECALL_INTERVAL: ${RECALL_INTERVAL:-10s}
+      # live: grade against an exact scan of what exists now. frozen: the seed-time neighbours.
+      RECALL_TRUTH: ${RECALL_TRUTH:-live}
+    ports:
+      - "9948:9948"
+    volumes:
+      - osmc_golden:/golden:ro
+    networks:
+      - pl-demo
+
+  osmc-index-exporter:
+    <<: *dns
+    image: ${SEED_IMAGE:-python:3.12-slim}
+    profiles: ["osmc"]
+    hostname: osmc-index-exporter
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://root:root@mongod:27017/?authSource=admin&directConnection=true}
+      MONGO_DB: ${MONGO_DB:-boardgames}
+      MONGO_COLLECTION: ${OSMC_COLLECTION:-catalog}
+      EXPORTER_PORT: "9949"
+      POLL_INTERVAL: "2"
+      PIP_ROOT_USER_ACTION: ignore
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        pip install --quiet --no-cache-dir pymongo==4.10.1
+        exec python /work/index-exporter.py
+    ports:
+      - "9949:9949"
+    volumes:
+      - ./pmm:/work:ro
+    networks:
+      - pl-demo
+
+  osmc-seed:
+    <<: *dns
+    image: ${SEED_IMAGE:-python:3.12-slim}
+    profiles: ["osmc-seed"]
+    restart: "no"
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://root:root@mongod:27017/?authSource=admin&directConnection=true}
+      MONGO_DB: ${MONGO_DB:-boardgames}
+      MONGO_COLLECTION: ${OSMC_COLLECTION:-catalog}
+      VECTOR_INDEX: ${OSMC_VECTOR_INDEX:-vec_osmc}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      EMBED_MODEL: ${EMBED_MODEL:-bge-small}
+      DATA_FILE: /work/data/easy_boardgames.ndjson
+      GOLDEN_PATH: /golden/golden.json
+      INDEX_PATH: /golden/index.json
+      CHURN_DOCS: ${CHURN_DOCS:-20000}
+      GOLDEN_QUERIES: ${GOLDEN_QUERIES:-500}
+      PIP_ROOT_USER_ACTION: ignore
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        pip install --quiet --no-cache-dir pymongo==4.10.1 'numpy==2.1.3'
+        exec python /work/seed.py
+    volumes:
+      - ./osmc/seed.py:/work/seed.py:ro
+      - ./data:/work/data:ro
+      - osmc_golden:/golden
+    networks:
+      - pl-demo
+
+  # Alternative vector engine for the recall demo. Opt-in (profile "opensearch");
+  # mongot stays the default. "opensearch-lab" is the one-shot driver.
+  opensearch:
+    <<: *dns
+    image: ${OPENSEARCH_IMAGE:-opensearchproject/opensearch:3.9.0}
+    profiles: ["opensearch"]
+    hostname: opensearch
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      bootstrap.memory_lock: "false"
+      OPENSEARCH_JAVA_OPTS: ${OPENSEARCH_JAVA_OPTS:--Xms1g -Xmx1g}
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    networks:
+      - pl-demo
+
+  # Cluster health, latency, doc counts and the recall probe, for PMM to scrape.
+  osmc-opensearch-exporter:
+    <<: *dns
+    image: ${SEED_IMAGE:-python:3.12-slim}
+    profiles: ["opensearch"]
+    hostname: osmc-opensearch-exporter
+    restart: unless-stopped
+    environment:
+      OPENSEARCH_URL: http://opensearch:9200
+      GOLDEN_PATH: /golden/golden.json
+      EXPORTER_ADDR: ":9951"
+      PROBE_INTERVAL: ${OS_PROBE_INTERVAL:-10}
+      PROBE_SAMPLE: ${OS_PROBE_SAMPLE:-500}
+      # builtin: OpenSearch's own exact k-NN. numpy: independent cross-check.
+      OS_TRUTH: ${OS_TRUTH:-builtin}
+      EF_SEARCH: ${EF_SEARCH:-100}
+      PYTHONUNBUFFERED: "1"
+      PIP_ROOT_USER_ACTION: ignore
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        pip install --quiet --no-cache-dir 'numpy==2.1.3'
+        cd /work && exec python exporter.py
+    ports:
+      - "9951:9951"
+    volumes:
+      - ./osmc/opensearch:/work:ro
+      - osmc_golden:/golden:ro
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks:
+      - pl-demo
+
+  # The layer the recall probes cannot see: does the embedding model still match the catalog?
+  # Goes through the same path as the application (the model `swap-model` switches).
+  osmc-embedding-probe:
+    <<: *dns
+    image: ${SEED_IMAGE:-python:3.12-slim}
+    profiles: ["opensearch"]
+    hostname: osmc-embedding-probe
+    restart: unless-stopped
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://root:root@mongod:27017/?authSource=admin&directConnection=true}
+      MONGO_DB: ${MONGO_DB:-boardgames}
+      MONGO_COLLECTION: ${OSMC_COLLECTION:-catalog}
+      OPENSEARCH_URL: http://opensearch:9200
+      OLLAMA_URL: http://ollama:11434
+      EMBED_MODEL: ${EMBED_MODEL:-bge-small}
+      INDEX_EMBED_MODEL: ${INDEX_EMBED_MODEL:-bge-small}
+      GOLDEN_PATH: /golden/golden.json
+      EF_SEARCH: ${EF_SEARCH:-100}
+      EXPORTER_ADDR: ":9952"
+      # Every few seconds so a model swap shows up fast, with few calls so the host stays calm.
+      PROBE_INTERVAL: ${EMBED_PROBE_INTERVAL:-4}
+      CANARY_PASSAGES: ${EMBED_CANARY_PASSAGES:-5}
+      E2E_QUESTIONS: ${EMBED_E2E_QUESTIONS:-8}
+      PYTHONUNBUFFERED: "1"
+      PIP_ROOT_USER_ACTION: ignore
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        pip install --quiet --no-cache-dir pymongo==4.10.1 'numpy==2.1.3'
+        cd /work && exec python embedding_probe.py
+    ports:
+      - "9952:9952"
+    volumes:
+      - ./osmc/opensearch:/work:ro
+      - osmc_golden:/golden:ro
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks:
+      - pl-demo
+
+  # Everything a normal dashboard watches except recall: service checks, container CPU and memory,
+  # the embedding model, OpenSearch node stats. Read-only access to the Docker socket (a lab setup:
+  # that socket is root on the host).
+  osmc-health-exporter:
+    <<: *dns
+    image: ${SEED_IMAGE:-python:3.12-slim}
+    profiles: ["opensearch"]
+    hostname: osmc-health-exporter
+    restart: unless-stopped
+    environment:
+      OPENSEARCH_URL: http://opensearch:9200
+      OLLAMA_URL: http://ollama:11434
+      BACKEND_URL: http://backend:8000
+      FRONTEND_URL: http://frontend:80
+      MONGOT_HEALTH_URL: http://mongot:8080/health
+      MONGOD_ADDR: mongod:27017
+      EMBED_MODEL: ${EMBED_MODEL:-bge-small}
+      QUERY_MODEL_FILE: /golden/query_model
+      COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-pl-demo}
+      EXPORTER_ADDR: ":9953"
+      PROBE_INTERVAL: ${HEALTH_PROBE_INTERVAL:-10}
+      PYTHONUNBUFFERED: "1"
+    entrypoint: ["python", "/work/health_exporter.py"]
+    ports:
+      - "9953:9953"
+    volumes:
+      - ./osmc/opensearch:/work:ro
+      - osmc_golden:/golden:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - pl-demo
+
+  opensearch-lab:
+    <<: *dns
+    image: ${SEED_IMAGE:-python:3.12-slim}
+    profiles: ["opensearch-lab"]
+    restart: "no"
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://root:root@mongod:27017/?authSource=admin&directConnection=true}
+      MONGO_DB: ${MONGO_DB:-boardgames}
+      MONGO_COLLECTION: ${OSMC_COLLECTION:-catalog}
+      OPENSEARCH_URL: http://opensearch:9200
+      OLLAMA_URL: http://ollama:11434
+      EMBED_MODEL: ${EMBED_MODEL:-bge-small}
+      INDEX_EMBED_MODEL: ${INDEX_EMBED_MODEL:-bge-small}
+      GOLDEN_PATH: /golden/golden.json
+      EF_SEARCH: ${EF_SEARCH:-100}
+      DELETE_FRACTION: ${OS_DELETE_FRACTION:-0.3}
+      PIP_ROOT_USER_ACTION: ignore
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        pip install --quiet --no-cache-dir pymongo==4.10.1 'numpy==2.1.3'
+        exec python /work/os_lab.py "$$@"
+      - os-lab
+    volumes:
+      - ./osmc/opensearch:/work:ro
+      - osmc_golden:/golden
+    networks:
+      - pl-demo
+
+  vllm:
+    <<: *dns
+    image: ${VLLM_IMAGE:-vllm/vllm-openai-cpu:v0.32.0-x86_64}
+    profiles: ["osmc-rag"]
+    hostname: vllm
+    shm_size: "4gb"
+    environment:
+      VLLM_CPU_KVCACHE_SPACE: ${VLLM_CPU_KVCACHE_SPACE:-2}
+      HF_HUB_ENABLE_HF_TRANSFER: "0"
+      # 1 = never contact huggingface.co; the weights come from the vllm_hf volume.
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+      TRANSFORMERS_OFFLINE: ${HF_HUB_OFFLINE:-0}
+      # V1 on CPU spends many seconds per token. V0 is the engine that
+      # actually finishes a sentence on this machine.
+      VLLM_USE_V1: "0"
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-4}
+    command:
+      - --model
+      - ${VLLM_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}
+      - --max-model-len
+      - "2048"
+      - --dtype
+      - float32
+      - --enforce-eager
+    ports:
+      # Host 8000 is the board-games API. Inside the network vLLM stays on 8000.
+      - "8002:8000"
+    volumes:
+      - vllm_hf:/root/.cache/huggingface
+    networks:
+      - pl-demo
+
+  # Builds the image the Python tools run on (make offline-prepare). Not started.
+  pytools:
+    build: ./osmc/pytools
+    image: pl-demo-pytools:1
+    profiles: ["tools"]
+    command: ["true"]
+    restart: "no"
+
 volumes:
   mongod_data:
   mongot_data:
   ollama_data:
   pmm_data:
+  osmc_golden:
+  vllm_hf:
+  opensearch_data:
 
 networks:
   pl-demo:

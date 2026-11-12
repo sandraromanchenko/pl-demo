@@ -1,0 +1,43 @@
+// Architecture of the OSMC talk demo (what runs on the laptop).
+// Regenerate:  dot -Tpng -Gdpi=150 docs/demo-architecture.dot -o docs/demo-architecture.png
+digraph osmc_demo {
+  rankdir=TB;
+  splines=spline;
+  bgcolor="white";
+  pad=0.35;
+  nodesep=0.9;
+  ranksep=0.85;
+  fontname="Helvetica";
+
+  node [shape=box, style="rounded,filled", fillcolor="white", penwidth=1.8,
+        fontname="Helvetica", fontsize=13, margin="0.28,0.16", height=0.7];
+  edge [fontname="Helvetica", fontsize=11, color="#64748B", fontcolor="#475569",
+        penwidth=1.5, arrowsize=0.8];
+
+  user [label=<<B>Browser</B>>, fillcolor="#F1F5F9", color="#94A3B8", fontcolor="#334155"];
+  app  [label=<<B>Search app</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">frontend :8081 + backend</FONT>>, color="#E0AC08", fillcolor="#FFFBEB"];
+
+  model [label=<<B>Ollama: the embedding model</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">bge-small (right model)</FONT><BR/><FONT POINT-SIZE="10" COLOR="#64748B">snowflake-arctic-embed (the swap)</FONT><BR/><FONT POINT-SIZE="10" COLOR="#64748B">both give 384 numbers</FONT>>, color="#2E9E6F", fillcolor="#EBFBF3"];
+  a [label=<<B>Engine A: Percona Search</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">MongoDB + mongot (Lucene HNSW)</FONT><BR/><FONT POINT-SIZE="10" COLOR="#64748B">catalog: 100 games + 20,000 filler docs</FONT>>, color="#2F80C1", fillcolor="#EFF6FF"];
+  b [label=<<B>Engine B: OpenSearch</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">Faiss HNSW</FONT><BR/><FONT POINT-SIZE="10" COLOR="#64748B">the same vectors</FONT>>, color="#8B5CC6", fillcolor="#F6F0FF"];
+
+  probes [label=<<B>Probes (what I added)</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">ANN recall: saved vector, engine vs exact scan</FONT><BR/><FONT POINT-SIZE="10" COLOR="#64748B">Embedding canary: re-embed 5 stable docs, compare</FONT><BR/><FONT POINT-SIZE="10" COLOR="#64748B">Query canary: embed questions now, compare top 10</FONT><BR/><FONT POINT-SIZE="10" COLOR="#64748B">Plus ordinary exporters: status, health, memory</FONT>>, color="#EA7A2D", fillcolor="#FFF4EB"];
+
+  pmm [label=<<B>PMM (VictoriaMetrics + Grafana)</B><BR/><FONT POINT-SIZE="10" COLOR="#64748B">dashboard 1: key metrics &#183; dashboard 2: key metrics + recall</FONT><BR/><FONT POINT-SIZE="10" COLOR="#64748B">https://localhost:8443</FONT>>, color="#334155", fillcolor="#F1F5F9"];
+
+  user -> app [label=" search"];
+  app -> model [label=" embed the question"];
+  app -> a [label=" vector search"];
+  app -> b [label=" vector search"];
+  a -> model [label=" embeds the documents", style=dashed, constraint=false];
+
+  probes -> a [style=dashed, color="#EA7A2D"];
+  probes -> b [style=dashed, color="#EA7A2D"];
+  probes -> model [style=dashed, color="#EA7A2D", label=" asks the live model", fontcolor="#C2570F"];
+  a -> pmm [style=dotted, color="#334155", label=" mongot metrics"];
+  probes -> pmm [color="#334155", penwidth=2.2, label=" metrics"];
+
+  {rank=same; a; model; b;}
+  a -> model [style=invis];
+  model -> b [style=invis];
+}

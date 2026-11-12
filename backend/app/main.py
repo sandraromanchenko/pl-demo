@@ -1,12 +1,16 @@
 """FastAPI backend: /health, /models, /games, /search (text | fulltext | vector
 | hybrid)."""
+import time
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo.errors import OperationFailure, PyMongoError
 
+from . import metrics
 from . import search as search_mod
+from . import vector as vector_mod
 from .config import get_settings
 from .db import ping
 
@@ -20,7 +24,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+
+@app.middleware("http")
+async def count_searches(request: Request, call_next):
+    """Rate, errors and duration of /search for PMM. Other paths are not counted."""
+    if request.url.path != "/search":
+        return await call_next(request)
+    engine = request.query_params.get("engine", "mongot")
+    type_ = request.query_params.get("type", "vector")
+    started = metrics.start()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        metrics.finish(started, engine, type_, status)
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def prometheus_metrics():
+    return metrics.render()
+
+
 SearchType = Literal["text", "fulltext", "vector", "hybrid"]
+Engine = Literal["mongot", "opensearch"]
 
 TYPE_LABELS = {
     "text": "Text search",
@@ -104,12 +133,35 @@ def list_games(limit: int = Query(100, ge=1, le=500)):
 @app.get("/search")
 def do_search(
     q: str = Query(..., min_length=1, description="Search query text."),
-    type: SearchType = Query("fulltext", description="Search mode: text ($text), fulltext ($search), vector, hybrid."),
-    model: str | None = Query(None, description="Embedding model / vector index for vector & hybrid."),
+    type: SearchType = Query("vector", description="Search mode: text ($text), fulltext ($search), vector, hybrid. mongot only."),
+    engine: Engine = Query("mongot", description="mongot (PSMDB + mongot) or opensearch. OpenSearch only does vector search."),
+    model: str | None = Query(None, description="Embedding model / vector index for the legacy auto-embed vector search."),
     limit: int = Query(5, ge=1, le=100),
 ):
     settings = get_settings()
     model = model or settings.default_model
+
+    # The catalog path: the question is embedded here, the same vectors sit in both engines.
+    # Without a seeded catalog, vector search on mongot falls back to the auto-embed index.
+    catalog = engine == "opensearch" or (type == "vector" and vector_mod.catalog_ready())
+    if catalog:
+        try:
+            results, ms = vector_mod.search(engine, q, limit)
+        except vector_mod.EngineUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        except OperationFailure as exc:
+            raise HTTPException(status_code=503, detail=_unavailable_detail("vector", model, exc))
+        except PyMongoError as exc:
+            raise HTTPException(status_code=502, detail=f"search failed: {exc}")
+        return {
+            "query": q,
+            "type": "vector",
+            "engine": engine,
+            "model": None,
+            "latencyMs": ms,
+            "count": len(results),
+            "results": results,
+        }
 
     if type in ("vector", "hybrid") and model not in settings.vector_indexes:
         raise HTTPException(
@@ -117,6 +169,7 @@ def do_search(
             detail=f"unknown model '{model}'; available: {list(settings.vector_indexes)}",
         )
 
+    started = time.perf_counter()
     try:
         results = search_mod.search(q, type, model, limit)
     except ValueError as exc:
@@ -132,7 +185,9 @@ def do_search(
     return {
         "query": q,
         "type": type,
+        "engine": engine,
         "model": model if type in ("vector", "hybrid") else None,
+        "latencyMs": round((time.perf_counter() - started) * 1000, 1),
         "count": len(results),
         "results": results,
     }
